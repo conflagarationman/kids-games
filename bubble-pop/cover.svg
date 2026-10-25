@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7fd3ff"/>
+      <stop offset="0.6" stop-color="#c3b4ff"/>
+      <stop offset="1" stop-color="#ffc2e3"/>
+    </linearGradient>
+    <!-- a soap bubble: clear in the middle, rainbow sheen at the rim -->
+    <radialGradient id="soap" cx="0.38" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.75"/>
+      <stop offset="0.55" stop-color="#e8f7ff" stop-opacity="0.18"/>
+      <stop offset="0.82" stop-color="#ff9ad8" stop-opacity="0.45"/>
+      <stop offset="0.93" stop-color="#8ad8ff" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#b59cff" stop-opacity="0.9"/>
+    </radialGradient>
+    <radialGradient id="soap2" cx="0.38" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.75"/>
+      <stop offset="0.55" stop-color="#fff6d8" stop-opacity="0.18"/>
+      <stop offset="0.82" stop-color="#9df0c0" stop-opacity="0.45"/>
+      <stop offset="0.93" stop-color="#ffd36e" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#ff8fb8" stop-opacity="0.9"/>
+    </radialGradient>
+    <symbol id="b" viewBox="-100 -100 200 200">
+      <circle r="96" fill="url(#soap)" stroke="#fff" stroke-opacity="0.85" stroke-width="4"/>
+      <ellipse cx="-40" cy="-46" rx="24" ry="12" transform="rotate(-38 -40 -46)" fill="#fff" opacity="0.95"/>
+      <circle cx="-14" cy="-66" r="6" fill="#fff" opacity="0.9"/>
+    </symbol>
+    <symbol id="b2" viewBox="-100 -100 200 200">
+      <circle r="96" fill="url(#soap2)" stroke="#fff" stroke-opacity="0.85" stroke-width="4"/>
+      <ellipse cx="-40" cy="-46" rx="24" ry="12" transform="rotate(-38 -40 -46)" fill="#fff" opacity="0.95"/>
+      <circle cx="-14" cy="-66" r="6" fill="#fff" opacity="0.9"/>
+    </symbol>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6"/></filter>
+  </defs>
+
+  <rect width="800" height="500" fill="url(#sky)"/>
+
+  <!-- clouds -->
+  <g fill="#fff" opacity="0.8">
+    <path d="M40 140c0-26 22-44 48-40 8-22 40-32 62-14 22-10 50 4 52 30 22 2 34 18 30 34H40z"/>
+    <path d="M560 96c0-20 18-34 38-30 8-18 34-24 50-10 18-6 38 4 40 24 18 2 28 14 24 26H560z" opacity="0.85"/>
+    <path d="M610 430c0-22 20-38 42-34 8-20 36-28 54-12 20-8 42 4 44 26 20 2 30 16 26 30H610z" opacity="0.7"/>
+  </g>
+
+  <!-- background bubbles, softly out of focus -->
+  <g opacity="0.55" filter="url(#soft)">
+    <use href="#b" x="640" y="160" width="90" height="90"/>
+    <use href="#b2" x="70" y="300" width="80" height="80"/>
+    <use href="#b" x="330" y="20" width="60" height="60"/>
+  </g>
+
+  <!-- the main bubbles with surprises inside -->
+  <use href="#b" x="250" y="110" width="300" height="300"/>
+  <text x="400" y="292" font-size="150" text-anchor="middle" font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif">🐶</text>
+
+  <use href="#b2" x="560" y="250" width="180" height="180"/>
+  <text x="650" y="364" font-size="86" text-anchor="middle" font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif">🐥</text>
+
+  <use href="#b2" x="96" y="96" width="150" height="150"/>
+  <text x="171" y="171" font-size="88" font-weight="900" fill="#ff4fb0" stroke="#fff" stroke-width="8" paint-order="stroke" text-anchor="middle" dominant-baseline="central" font-family="Arial Rounded MT Bold, Trebuchet MS, sans-serif">A</text>
+
+  <use href="#b" x="170" y="320" width="120" height="120"/>
+  <path d="M230 352l9 19 21 3-15 15 4 21-19-10-19 10 4-21-15-15 21-3z" fill="#f5c800" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>
+
+  <use href="#b" x="470" y="40" width="110" height="110"/>
+  <text x="525" y="95" font-size="62" font-weight="900" fill="#2f7bff" stroke="#fff" stroke-width="7" paint-order="stroke" text-anchor="middle" dominant-baseline="central" font-family="Arial Rounded MT Bold, Trebuchet MS, sans-serif">3</text>
+
+  <!-- a bubble mid-pop -->
+  <g transform="translate(700 70)" stroke-linecap="round" stroke-width="7">
+    <line x1="0" y1="-30" x2="0" y2="-48" stroke="#ff4fb0"/>
+    <line x1="26" y1="-15" x2="42" y2="-24" stroke="#ff9a1f"/>
+    <line x1="26" y1="15" x2="42" y2="24" stroke="#22b84a"/>
+    <line x1="0" y1="30" x2="0" y2="48" stroke="#2f7bff"/>
+    <line x1="-26" y1="15" x2="-42" y2="24" stroke="#a04dff"/>
+    <line x1="-26" y1="-15" x2="-42" y2="-24" stroke="#f5c800"/>
+    <circle r="9" fill="#fff" stroke="none"/>
+  </g>
+
+  <!-- sparkles -->
+  <g fill="#fff">
+    <path d="M90 60l5 13 13 5-13 5-5 13-5-13-13-5 13-5z"/>
+    <path d="M760 250l4 10 10 4-10 4-4 10-4-10-10-4 10-4z"/>
+    <path d="M330 450l4 10 10 4-10 4-4 10-4-10-10-4 10-4z"/>
+    <path d="M590 200l3 8 8 3-8 3-3 8-3-8-8-3 8-3z"/>
+  </g>
+</svg>
