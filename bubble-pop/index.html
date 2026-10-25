@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Bubble Pop!</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-title" content="Bubble Pop">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#8fd8ff">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  body { background: linear-gradient(180deg, #8fd8ff 0%, #c9b8ff 60%, #ffc6e5 100%); }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
+
+  /* Parent button: small, faded, needs a long press so little fingers don't open it */
+  #parentBtn { position: fixed; top: 10px; right: 10px; width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 3; touch-action: none; }
+  #parentBtn .ring { position: absolute; inset: -4px; border-radius: 50%; border: 4px solid #ff6fb1; clip-path: inset(0 0 100% 0); }
+  #parentBtn.holding .ring { animation: fill 1.5s linear forwards; }
+  @keyframes fill { to { clip-path: inset(0 0 0 0); } }
+
+  #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; }
+  #panel.open { display: flex; }
+  .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+  .card h2 { margin: 0 0 4px; }
+  .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
+  .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
+  .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .modes button, .toggles button, .done { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; }
+  .modes button.on { border-color: #38c6f4; background: #e3f7ff; }
+  .toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .toggles button.off { opacity: .45; }
+  .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<button id="parentBtn" aria-label="Grown-up settings (press and hold)">⚙️<span class="ring"></span></button>
+
+<div id="panel">
+  <div class="card">
+    <h2>Grown-up settings</h2>
+    <p>Press and hold the ⚙️ to get back here.</p>
+    <div class="label">What's in the bubbles?</div>
+    <div class="modes">
+      <button data-mode="animals">🐶 Animals</button>
+      <button data-mode="colors">🎨 Colors</button>
+      <button data-mode="letters">🔤 Letters</button>
+      <button data-mode="numbers">🔢 Numbers</button>
+      <button data-mode="shapes">⭐ Shapes</button>
+      <button data-mode="mix">🌈 Mix it up</button>
+    </div>
+    <div class="label">Sound</div>
+    <div class="toggles">
+      <button id="tSound">🔊 Sounds</button>
+      <button id="tVoice">🗣️ Voice</button>
+      <button id="tFull">⛶ Full screen</button>
+    </div>
+    <div class="label">Bubble speed</div>
+    <div class="modes">
+      <button data-speed="0.6">🐢 Slow</button>
+      <button data-speed="1">🐇 Normal</button>
+      <button data-speed="1.7" style="grid-column: span 2">🚀 Super fast</button>
+    </div>
+    <button class="done" id="done">Let's play!</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ---------- Content ----------
+  const ANIMALS = [
+    ['🐶', 'Dog', 'Woof woof!'], ['🐱', 'Cat', 'Meow!'], ['🐮', 'Cow', 'Moo!'], ['🐷', 'Pig', 'Oink oink!'],
+    ['🦆', 'Duck', 'Quack quack!'], ['🐑', 'Sheep', 'Baa!'], ['🦁', 'Lion', 'Roar!'], ['🐸', 'Frog', 'Ribbit!'],
+    ['🐴', 'Horse', 'Neigh!'], ['🦉', 'Owl', 'Hoo hoo!'], ['🐵', 'Monkey', 'Ooh ooh ah ah!'], ['🐔', 'Chicken', 'Bawk bawk!'],
+    ['🐘', 'Elephant', 'Toot!'], ['🐝', 'Bee', 'Buzz!'], ['🐍', 'Snake', 'Hiss!'], ['🐻', 'Bear', 'Grr!'],
+    ['🐳', 'Whale', 'Splash!'], ['🐰', 'Bunny', 'Hop hop!'], ['🐧', 'Penguin', 'Waddle waddle!'], ['🦖', 'Dinosaur', 'Rawr!'],
+  ];
+  const COLORS = [
+    ['Red', '#ff3b3b'], ['Orange', '#ff9a1f'], ['Yellow', '#ffe11f'], ['Green', '#34d058'],
+    ['Blue', '#2f7bff'], ['Purple', '#a04dff'], ['Pink', '#ff6fc8'], ['Brown', '#9a5a2c'],
+    ['Black', '#222'], ['White', '#fff'],
+  ];
+  const SHAPES = ['Circle', 'Square', 'Triangle', 'Star', 'Heart', 'Diamond'];
+  const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const LETTER_WORDS = { A:'Apple', B:'Ball', C:'Cat', D:'Dog', E:'Egg', F:'Fish', G:'Goat', H:'Hat', I:'Igloo', J:'Juice',
+    K:'Kite', L:'Lion', M:'Moon', N:'Nest', O:'Octopus', P:'Pig', Q:'Queen', R:'Rainbow', S:'Sun', T:'Tree', U:'Umbrella',
+    V:'Van', W:'Whale', X:'Fox', Y:'Yo-yo', Z:'Zebra' };
+  const BRIGHT = ['#ff3b3b', '#ff9a1f', '#f5c800', '#22b84a', '#2f7bff', '#a04dff', '#ff4fb0'];
+  const pick = a => a[(Math.random() * a.length) | 0];
+
+  function makeItem(mode) {
+    if (mode === 'mix') mode = pick(['animals', 'animals', 'colors', 'letters', 'numbers', 'shapes']);
+    switch (mode) {
+      case 'animals': { const [e, n, s] = pick(ANIMALS); return { kind: 'emoji', glyph: e, say: `${n}! ${s}` }; }
+      case 'colors':  { const [n, c] = pick(COLORS); return { kind: 'color', color: c, say: n + '!' }; }
+      case 'letters': { const l = pick(LETTERS); return { kind: 'text', glyph: l, color: pick(BRIGHT), say: `${l}! ${l} is for ${LETTER_WORDS[l]}` }; }
+      case 'numbers': { const n = 1 + ((Math.random() * 10) | 0); return { kind: 'text', glyph: String(n), color: pick(BRIGHT), say: n + '!', count: n }; }
+      case 'shapes':  { const s = pick(SHAPES); return { kind: 'shape', shape: s, color: pick(BRIGHT), say: s + '!' }; }
+    }
+  }
+
+  // ---------- Settings (only settings are saved) ----------
+  const KEY = 'bubblePop.kids.v1';
+  let settings = { mode: 'animals', sound: true, voice: true, speed: 0.6 };
+  try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
+  const saveSettings = () => localStorage.setItem(KEY, JSON.stringify(settings));
+
+  // ---------- Canvas ----------
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  let W = 0, H = 0;
+  function resize() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener('resize', resize); resize();
+  const unit = () => Math.min(W, H);
+
+  // ---------- Audio ----------
+  let actx = null;
+  function audio() {
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (actx && actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  // Major pentatonic, so any run of pops sounds like a little tune
+  const NOTES = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51];
+  function tone(freq, start, dur, type = 'sine', vol = 0.18) {
+    const a = actx; if (!a) return;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, start);
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.exponentialRampToValueAtTime(vol, start + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    o.connect(g).connect(a.destination); o.start(start); o.stop(start + dur + 0.02);
+  }
+  function popSound() {
+    if (!settings.sound || !audio()) return;
+    const t = actx.currentTime;
+    // the "pop"
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.setValueAtTime(700, t); o.frequency.exponentialRampToValueAtTime(180, t + 0.08);
+    g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.12);
+    // the happy note
+    tone(pick(NOTES), t + 0.03, 0.45, 'triangle', 0.14);
+  }
+  function sparkleSound() {
+    if (!settings.sound || !audio()) return;
+    const t = actx.currentTime;
+    tone(pick(NOTES) * 2, t, 0.25, 'sine', 0.05);
+  }
+  function cheerSound() {
+    if (!settings.sound || !audio()) return;
+    const t = actx.currentTime;
+    [0, 2, 4, 5, 7].forEach((n, i) => tone(NOTES[n % NOTES.length] * (n > 7 ? 2 : 1), t + i * 0.11, 0.5, 'triangle', 0.13));
+  }
+
+  // ---------- Voice ----------
+  let voice = null;
+  function chooseVoice() {
+    const vs = speechSynthesis.getVoices().filter(v => v.lang && v.lang.startsWith('en'));
+    voice = vs.find(v => /samantha|karen|female|zira|aria|jenny|google us english/i.test(v.name)) || vs[0] || null;
+  }
+  if ('speechSynthesis' in window) { chooseVoice(); speechSynthesis.onvoiceschanged = chooseVoice; }
+  function say(text) {
+    if (!settings.voice || !('speechSynthesis' in window)) return;
+    speechSynthesis.cancel(); // always say the newest thing, never a backlog
+    const u = new SpeechSynthesisUtterance(text);
+    if (voice) u.voice = voice;
+    u.rate = 0.9; u.pitch = 1.3;
+    speechSynthesis.speak(u);
+  }
+
+  // ---------- Entities ----------
+  const bubbles = [], particles = [], reveals = [], confetti = [];
+  let popCount = 0;
+
+  function spawnBubble(x, y) {
+    const r = unit() * (0.09 + Math.random() * 0.05);
+    bubbles.push({
+      x: x ?? (r + Math.random() * Math.max(1, W - 2 * r)),
+      y: y ?? (H + r),
+      r, item: makeItem(settings.mode),
+      vy: -(unit() * (0.06 + Math.random() * 0.05)),
+      phase: Math.random() * Math.PI * 2,
+      hue: (Math.random() * 360) | 0,
+      born: performance.now(),
+    });
+  }
+
+  function popBubble(i) {
+    const b = bubbles.splice(i, 1)[0];
+    popCount++;
+    popSound();
+    say(b.item.say);
+    const n = 18;
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2;
+      const sp = unit() * (0.25 + Math.random() * 0.35);
+      particles.push({ x: b.x + Math.cos(a) * b.r, y: b.y + Math.sin(a) * b.r, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        t: 0, life: 0.6, r: 3 + Math.random() * 5, hue: (b.hue + k * 20) % 360 });
+    }
+    reveals.push({ x: b.x, y: b.y, r: b.r, item: b.item, t: 0 });
+    if (popCount % 12 === 0) celebrate();
+    // keep the screen lively: a fresh bubble arrives soon after each pop
+    setTimeout(() => { if (bubbles.length < maxBubbles()) spawnBubble(); }, 400);
+  }
+
+  function celebrate() {
+    setTimeout(() => {
+      cheerSound();
+      say(pick(['Hooray!', 'Yay! Great popping!', 'Wow! You did it!', 'Super popper!']));
+      for (let k = 0; k < 120; k++) {
+        confetti.push({ x: Math.random() * W, y: -20 - Math.random() * H * 0.5,
+          vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 160, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10,
+          w: 8 + Math.random() * 8, h: 5 + Math.random() * 5, color: pick(BRIGHT), t: 0 });
+      }
+    }, 900);
+  }
+
+  const maxBubbles = () => Math.max(5, Math.min(9, Math.round((W * H) / 90000)));
+
+  // ---------- Input: every finger counts, swiping pops too ----------
+  const down = new Set();
+  function hit(x, y) {
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      // generous hit zone for small, imprecise fingers
+      if ((b.x - x) ** 2 + (b.y - y) ** 2 <= (b.r * 1.25 + 14) ** 2) return i;
+    }
+    return -1;
+  }
+  function touch(x, y, isTap) {
+    const i = hit(x, y);
+    if (i >= 0) { popBubble(i); return; }
+    if (isTap) {
+      // tapping empty sky still does something nice
+      sparkleSound();
+      for (let k = 0; k < 10; k++) {
+        const a = Math.random() * Math.PI * 2, sp = 40 + Math.random() * 90;
+        particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, life: 0.5, r: 2 + Math.random() * 3, hue: (Math.random() * 360) | 0, star: true });
+      }
+      if (bubbles.length < maxBubbles() + 2) spawnBubble(x, H + unit() * 0.15);
+    }
+  }
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); audio(); down.add(e.pointerId); touch(e.clientX, e.clientY, true); });
+  cv.addEventListener('pointermove', e => { if (down.has(e.pointerId)) touch(e.clientX, e.clientY, false); });
+  const lift = e => down.delete(e.pointerId);
+  addEventListener('pointerup', lift); addEventListener('pointercancel', lift);
+  addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('gesturestart', e => e.preventDefault()); // iOS pinch zoom
+
+  // ---------- Drawing ----------
+  function shapePath(shape, x, y, s) {
+    ctx.beginPath();
+    switch (shape) {
+      case 'Circle': ctx.arc(x, y, s, 0, Math.PI * 2); break;
+      case 'Square': ctx.rect(x - s * 0.85, y - s * 0.85, s * 1.7, s * 1.7); break;
+      case 'Triangle': ctx.moveTo(x, y - s); ctx.lineTo(x + s * 0.95, y + s * 0.75); ctx.lineTo(x - s * 0.95, y + s * 0.75); ctx.closePath(); break;
+      case 'Diamond': ctx.moveTo(x, y - s); ctx.lineTo(x + s * 0.75, y); ctx.lineTo(x, y + s); ctx.lineTo(x - s * 0.75, y); ctx.closePath(); break;
+      case 'Star':
+        for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? s * 0.45 : s; ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+        ctx.closePath(); break;
+      case 'Heart':
+        ctx.moveTo(x, y + s * 0.85);
+        ctx.bezierCurveTo(x - s * 1.4, y - s * 0.1, x - s * 0.6, y - s * 1.2, x, y - s * 0.45);
+        ctx.bezierCurveTo(x + s * 0.6, y - s * 1.2, x + s * 1.4, y - s * 0.1, x, y + s * 0.85); break;
+    }
+  }
+
+  function drawItem(item, x, y, size, alpha) {
+    ctx.save(); ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (item.kind === 'emoji') {
+      ctx.font = `${size * 1.2}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      ctx.fillText(item.glyph, x, y + size * 0.08);
+    } else if (item.kind === 'text') {
+      ctx.font = `900 ${size * 1.3}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
+      ctx.lineWidth = size * 0.14; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round';
+      ctx.strokeText(item.glyph, x, y + size * 0.06);
+      ctx.fillStyle = item.color; ctx.fillText(item.glyph, x, y + size * 0.06);
+    } else if (item.kind === 'shape') {
+      shapePath(item.shape, x, y, size * 0.6);
+      ctx.fillStyle = item.color; ctx.fill();
+      ctx.lineWidth = size * 0.08; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round'; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawBubble(b, now) {
+    const grow = Math.min(1, (now - b.born) / 300);
+    const r = b.r * (0.5 + 0.5 * grow) * (1 + Math.sin(b.phase * 1.6) * 0.035);
+    const tint = b.item.kind === 'color' ? b.item.color : null;
+    const g = ctx.createRadialGradient(b.x - r * 0.35, b.y - r * 0.35, r * 0.1, b.x, b.y, r);
+    if (tint) {
+      g.addColorStop(0, 'rgba(255,255,255,0.7)'); g.addColorStop(0.35, tint); g.addColorStop(1, tint);
+    } else {
+      g.addColorStop(0, 'rgba(255,255,255,0.6)');
+      g.addColorStop(0.7, `hsla(${b.hue},90%,80%,0.25)`);
+      g.addColorStop(0.92, `hsla(${b.hue + 50},95%,72%,0.6)`);
+      g.addColorStop(1, `hsla(${b.hue + 100},95%,82%,0.9)`);
+    }
+    ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.stroke();
+    if (!tint) drawItem(b.item, b.x, b.y, r * 0.75, 0.95);
+    ctx.beginPath(); ctx.ellipse(b.x - r * 0.4, b.y - r * 0.45, r * 0.22, r * 0.11, -0.7, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
+  }
+
+  // ---------- Loop ----------
+  let last = performance.now(), spawnT = 0;
+  function update(dt) {
+    const sp = settings.speed;
+    spawnT -= dt;
+    if (spawnT <= 0 && bubbles.length < maxBubbles()) { spawnBubble(); spawnT = (0.8 + Math.random() * 0.8) / sp; }
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      b.phase += dt * 1.5;
+      b.x += Math.sin(b.phase) * 20 * dt;
+      b.y += b.vy * sp * dt;
+      b.x = Math.max(b.r, Math.min(W - b.r, b.x));
+      if (b.y < -b.r * 1.5) bubbles.splice(i, 1);
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i]; p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.93; p.vy *= 0.93;
+      if (p.t > p.life) particles.splice(i, 1);
+    }
+    for (let i = reveals.length - 1; i >= 0; i--) { const r = reveals[i]; r.t += dt; r.y -= unit() * 0.05 * dt; if (r.t > 1.6) reveals.splice(i, 1); }
+    for (let i = confetti.length - 1; i >= 0; i--) {
+      const c = confetti[i]; c.t += dt; c.x += (c.vx + Math.sin(c.t * 3 + c.rot) * 40) * dt; c.y += c.vy * dt; c.rot += c.vr * dt;
+      if (c.y > H + 30) confetti.splice(i, 1);
+    }
+  }
+
+  function draw() {
+    const now = performance.now();
+    ctx.clearRect(0, 0, W, H);
+    for (const b of bubbles) drawBubble(b, now);
+    for (const p of particles) {
+      const k = 1 - p.t / p.life;
+      ctx.fillStyle = `hsla(${p.hue},95%,${p.star ? 90 : 75}%,${k})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * k, 0, Math.PI * 2); ctx.fill();
+    }
+    // the surprise from inside the bubble: pops up big, wiggles, floats away
+    for (const r of reveals) {
+      const t = r.t;
+      const scale = t < 0.25 ? 0.5 + (t / 0.25) * 0.9 : 1.4 - Math.min(0.2, (t - 0.25) * 0.4);
+      const alpha = t > 1.1 ? Math.max(0, 1 - (t - 1.1) / 0.5) : 1;
+      ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(Math.sin(t * 12) * 0.12 * Math.max(0, 1 - t));
+      const size = r.r * scale;
+      if (r.item.kind === 'color') {
+        ctx.globalAlpha = alpha;
+        ctx.beginPath(); ctx.arc(0, 0, size * 0.6, 0, Math.PI * 2); ctx.fillStyle = r.item.color; ctx.fill();
+        ctx.lineWidth = 5; ctx.strokeStyle = '#fff'; ctx.stroke();
+      } else {
+        drawItem(r.item, 0, 0, size, alpha);
+      }
+      // numbers: show that many dots so counting is concrete
+      if (r.item.count) {
+        ctx.globalAlpha = alpha; ctx.fillStyle = r.item.color;
+        const n = r.item.count, dot = Math.max(5, size * 0.09), gap = dot * 2.6, perRow = Math.min(n, 5);
+        for (let k = 0; k < n; k++) {
+          const row = (k / 5) | 0, col = k % 5, inRow = row === 0 ? perRow : n - 5;
+          ctx.beginPath(); ctx.arc((col - (inRow - 1) / 2) * gap, size * 0.95 + row * gap, dot, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
+    for (const c of confetti) {
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot); ctx.fillStyle = c.color;
+      ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h); ctx.restore();
+    }
+  }
+
+  function loop(t) {
+    const dt = Math.min(0.05, (t - last) / 1000); last = t;
+    update(dt); draw(); requestAnimationFrame(loop);
+  }
+
+  // ---------- Grown-up panel (press & hold 1.5s) ----------
+  const pb = document.getElementById('parentBtn'), panel = document.getElementById('panel');
+  let holdTimer = null;
+  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); holdTimer = setTimeout(openPanel, 1500); };
+  const endHold = () => { pb.classList.remove('holding'); clearTimeout(holdTimer); };
+  pb.addEventListener('pointerdown', startHold);
+  pb.addEventListener('pointerup', endHold); pb.addEventListener('pointerleave', endHold); pb.addEventListener('pointercancel', endHold);
+
+  function openPanel() { endHold(); syncPanel(); panel.classList.add('open'); }
+  function syncPanel() {
+    document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === settings.mode));
+    document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('on', +b.dataset.speed === settings.speed));
+    document.getElementById('tSound').classList.toggle('off', !settings.sound);
+    document.getElementById('tVoice').classList.toggle('off', !settings.voice);
+  }
+  document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+    settings.mode = b.dataset.mode; saveSettings(); syncPanel();
+    for (const bb of bubbles) bb.item = makeItem(settings.mode); // switch what's on screen right away
+  });
+  document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { settings.speed = +b.dataset.speed; saveSettings(); syncPanel(); });
+  document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
+  document.getElementById('tVoice').onclick = () => { settings.voice = !settings.voice; saveSettings(); syncPanel(); };
+  document.getElementById('tFull').onclick = () => {
+    const el = document.documentElement;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
+  };
+  document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
+
+  for (let i = 0; i < 4; i++) spawnBubble(undefined, H * (0.35 + Math.random() * 0.6));
+  requestAnimationFrame(loop);
+
+  // Offline support (only works over HTTPS or localhost)
+  if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
