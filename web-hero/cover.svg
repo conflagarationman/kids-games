@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6fc8ff"/>
+      <stop offset="0.6" stop-color="#cfe9ff"/>
+      <stop offset="1" stop-color="#ffdcc4"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff6b0" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#fff6b0" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#2b2d5c" flood-opacity="0.22"/>
+    </filter>
+    <pattern id="hazard" width="28" height="28" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="28" height="28" fill="#ffc82e"/><rect width="14" height="28" fill="#2b2d5c"/>
+    </pattern>
+    <g id="star"><path d="M0 -1 L0.29 -0.4 L0.95 -0.31 L0.47 0.15 L0.59 0.81 L0 0.5 L-0.59 0.81 L-0.47 0.15 L-0.95 -0.31 L-0.29 -0.4 Z"/></g>
+    <g id="crate">
+      <rect width="100" height="100" rx="7" fill="#d9a05b"/>
+      <rect x="5" y="5" width="90" height="90" rx="5" fill="none" stroke="#a8703a" stroke-width="8"/>
+      <path d="M12 12 L88 88" stroke="#a8703a" stroke-width="6" stroke-linecap="round"/>
+      <path d="M0 33 H100 M0 67 H100" stroke="#a8703a" stroke-width="3" opacity="0.7"/>
+      <rect x="6" y="6" width="88" height="5" rx="2" fill="#fff" opacity="0.25"/>
+    </g>
+  </defs>
+  <rect width="800" height="500" fill="url(#sky)"/>
+  <!-- clouds -->
+  <g fill="#fff" opacity="0.92">
+    <path d="M90 90 a28 28 0 0 1 52 -14 a24 24 0 0 1 40 14 a22 22 0 0 1 -6 40 h-78 a24 24 0 0 1 -8 -40 z"/>
+    <path d="M520 60 a22 22 0 0 1 42 -10 a20 20 0 0 1 34 12 a18 18 0 0 1 -4 32 h-62 a20 20 0 0 1 -10 -34 z"/>
+    <path d="M360 140 a16 16 0 0 1 30 -6 a14 14 0 0 1 24 8 a12 12 0 0 1 -2 22 h-42 a14 14 0 0 1 -10 -24 z"/>
+  </g>
+  <!-- far buildings -->
+  <g fill="#c6cbf4">
+    <rect x="-10" y="210" width="100" height="300" rx="22"/>
+    <rect x="150" y="150" width="110" height="360" rx="24" fill="#d9c8f3"/>
+    <rect x="330" y="230" width="100" height="280" rx="22" fill="#bfdaf4"/>
+    <rect x="560" y="170" width="110" height="340" rx="24"/>
+    <rect x="690" y="240" width="120" height="270" rx="22" fill="#d9c8f3"/>
+  </g>
+  <!-- near buildings with lit windows -->
+  <g>
+    <rect x="30" y="280" width="130" height="230" rx="26" fill="#8aa0e4"/>
+    <rect x="250" y="250" width="120" height="260" rx="26" fill="#ec92b8"/>
+    <rect x="440" y="290" width="120" height="220" rx="26" fill="#f4a76a"/>
+    <rect x="640" y="260" width="140" height="250" rx="26" fill="#74c6bb"/>
+    <g fill="#fff3a8">
+      <rect x="55" y="310" width="22" height="28" rx="4"/><rect x="105" y="310" width="22" height="28" rx="4"/><rect x="80" y="360" width="22" height="28" rx="4"/>
+      <rect x="275" y="285" width="22" height="28" rx="4"/><rect x="325" y="335" width="22" height="28" rx="4"/><rect x="275" y="385" width="22" height="28" rx="4"/>
+      <rect x="465" y="325" width="22" height="28" rx="4"/><rect x="515" y="375" width="22" height="28" rx="4"/>
+      <rect x="665" y="295" width="22" height="28" rx="4"/><rect x="715" y="345" width="22" height="28" rx="4"/><rect x="665" y="395" width="22" height="28" rx="4"/>
+    </g>
+    <g fill="#fff" opacity="0.3">
+      <rect x="105" y="360" width="22" height="28" rx="4"/><rect x="55" y="360" width="22" height="28" rx="4"/>
+      <rect x="325" y="285" width="22" height="28" rx="4"/><rect x="275" y="335" width="22" height="28" rx="4"/>
+      <rect x="515" y="325" width="22" height="28" rx="4"/><rect x="465" y="375" width="22" height="28" rx="4"/>
+      <rect x="715" y="295" width="22" height="28" rx="4"/><rect x="665" y="345" width="22" height="28" rx="4"/>
+    </g>
+  </g>
+  <!-- street -->
+  <rect y="430" width="800" height="14" fill="#e4dccf"/>
+  <rect y="444" width="800" height="56" fill="#4b4f66"/>
+  <g fill="#ffd23f"><rect x="30" y="470" width="70" height="7" rx="3"/><rect x="190" y="470" width="70" height="7" rx="3"/><rect x="350" y="470" width="70" height="7" rx="3"/><rect x="510" y="470" width="70" height="7" rx="3"/><rect x="670" y="470" width="70" height="7" rx="3"/></g>
+
+  <!-- the hero's ledge -->
+  <rect x="30" y="368" width="170" height="64" fill="#c5614a"/>
+  <rect x="30" y="392" width="170" height="3" fill="#fff" opacity="0.18"/><rect x="30" y="414" width="170" height="3" fill="#fff" opacity="0.18"/>
+  <rect x="20" y="358" width="190" height="16" rx="7" fill="#e8d6b5"/>
+
+  <!-- web strand + web ball flying to the stack -->
+  <path d="M215 262 Q 330 170 450 190" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-dasharray="1 17" opacity="0.95"/>
+  <path d="M215 262 Q 270 230 330 222" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+  <g filter="url(#shadow)" transform="translate(372 212)">
+    <circle r="30" fill="#fff" stroke="#8fa3c7" stroke-width="3"/>
+    <g stroke="#8fa3c7" stroke-width="2.5" fill="none">
+      <path d="M0 0 L30 0 M0 0 L21 21 M0 0 L0 30 M0 0 L-21 21 M0 0 L-30 0 M0 0 L-21 -21 M0 0 L0 -30 M0 0 L21 -21"/>
+      <path d="M12 0 L8.5 8.5 L0 12 L-8.5 8.5 L-12 0 L-8.5 -8.5 L0 -12 L8.5 -8.5 Z"/>
+      <path d="M22 0 L15 15 L0 22 L-15 15 L-22 0 L-15 -15 L0 -22 L15 -15 Z"/>
+    </g>
+  </g>
+
+  <!-- the hero (original masked kid) -->
+  <g filter="url(#shadow)">
+    <path d="M92 262 Q 40 280 28 350 Q 70 330 112 336 Z" fill="#ffd23f" stroke="#e0a800" stroke-width="3"/>
+    <rect x="96" y="318" width="22" height="46" rx="10" fill="#128c82"/><rect x="132" y="318" width="22" height="46" rx="10" fill="#128c82"/>
+    <rect x="90" y="354" width="34" height="16" rx="8" fill="#ff8a1f"/><rect x="130" y="354" width="34" height="16" rx="8" fill="#ff8a1f"/>
+    <path d="M92 262 L150 262 Q166 262 166 280 L166 322 L82 322 L82 280 Q82 262 92 262 Z" fill="#1fb5a8"/>
+    <rect x="82" y="312" width="84" height="12" fill="#ffd23f"/>
+    <use href="#star" transform="translate(124 292) scale(17)" fill="#ffd23f" stroke="#e0a800" stroke-width="0.14"/>
+    <!-- front arm raised toward the stack, orange web-shooter on the wrist -->
+    <path d="M148 276 L205 258" stroke="#1fb5a8" stroke-width="22" stroke-linecap="round"/>
+    <path d="M182 266 L212 256" stroke="#ff8a1f" stroke-width="30" stroke-linecap="round"/>
+    <circle cx="214" cy="256" r="8" fill="#fff"/>
+    <!-- head -->
+    <circle cx="124" cy="218" r="46" fill="#1fb5a8"/>
+    <ellipse cx="128" cy="224" rx="34" ry="32" fill="#ffd7b0"/>
+    <path d="M86 214 Q 128 190 168 212 Q 170 240 128 242 Q 86 242 86 214 Z" fill="#ff8a1f"/>
+    <ellipse cx="108" cy="222" rx="13" ry="14" fill="#fff"/><ellipse cx="146" cy="222" rx="13" ry="14" fill="#fff"/>
+    <circle cx="113" cy="223" r="7" fill="#2b2d5c"/><circle cx="151" cy="223" r="7" fill="#2b2d5c"/>
+    <circle cx="116" cy="219" r="2.5" fill="#fff"/><circle cx="154" cy="219" r="2.5" fill="#fff"/>
+    <path d="M114 248 Q 130 262 146 248" fill="none" stroke="#c4553a" stroke-width="4" stroke-linecap="round"/>
+  </g>
+
+  <!-- the stack, being knocked over -->
+  <g filter="url(#shadow)">
+    <use href="#crate" transform="translate(540 330)"/>
+    <use href="#crate" transform="translate(640 330)"/>
+    <use href="#crate" transform="translate(690 258) rotate(14 50 50)"/>
+    <rect x="520" y="316" width="240" height="18" rx="6" fill="url(#hazard)" transform="rotate(-6 640 325)"/>
+  </g>
+  <ellipse cx="520" cy="250" rx="80" ry="60" fill="url(#glow)"/>
+  <g font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif" text-anchor="middle" filter="url(#shadow)">
+    <text x="588" y="262" font-size="112" transform="rotate(-24 588 220)">🚚</text>
+    <text x="726" y="196" font-size="84" transform="rotate(32 726 160)">🚗</text>
+    <text x="740" y="425" font-size="72" transform="rotate(8 740 400)">🚕</text>
+  </g>
+  <!-- impact stars and sparkles -->
+  <g fill="#ffd23f" stroke="#fff" stroke-width="0.12" paint-order="stroke">
+    <use href="#star" transform="translate(478 168) scale(20) rotate(10)"/>
+    <use href="#star" transform="translate(690 110) scale(15) rotate(-14)"/>
+    <use href="#star" transform="translate(776 398) scale(13) rotate(8)"/>
+  </g>
+  <g fill="#fff">
+    <use href="#star" transform="translate(300 90) scale(10)"/>
+    <use href="#star" transform="translate(240 150) scale(7)"/>
+    <use href="#star" transform="translate(420 100) scale(8)"/>
+    <use href="#star" transform="translate(560 130) scale(9)"/>
+  </g>
+  <g opacity="0.95">
+    <rect x="330" y="40" width="16" height="9" rx="2" fill="#ff4fb0" transform="rotate(25 338 44)"/>
+    <rect x="610" y="50" width="16" height="9" rx="2" fill="#22b84a" transform="rotate(-30 618 54)"/>
+    <rect x="750" y="60" width="14" height="8" rx="2" fill="#a04dff" transform="rotate(40 757 64)"/>
+    <rect x="30" y="140" width="14" height="8" rx="2" fill="#ff9a1f" transform="rotate(-20 37 144)"/>
+  </g>
+</svg>
