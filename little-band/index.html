@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Little Band!</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-title" content="Little Band">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#ffd88a">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  body { background: linear-gradient(180deg, #ffd88a 0%, #ffb3a7 55%, #c9b8ff 100%); }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
+
+  /* Parent button: small, faded, needs a long press so little fingers don't open it */
+  #parentBtn { position: fixed; top: 10px; right: 10px; width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 3; touch-action: none; }
+  #parentBtn .ring { position: absolute; inset: -4px; border-radius: 50%; border: 4px solid #ff6fb1; clip-path: inset(0 0 100% 0); }
+  #parentBtn.holding .ring { animation: fill 1.5s linear forwards; }
+  @keyframes fill { to { clip-path: inset(0 0 0 0); } }
+
+  #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; overflow-y: auto; padding: 16px 0; }
+  #panel.open { display: flex; }
+  .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); margin: auto; }
+  .card h2 { margin: 0 0 4px; }
+  .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
+  .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
+  .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .modes button, .toggles button, .done { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; }
+  .modes button.on { border-color: #38c6f4; background: #e3f7ff; }
+  .toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .toggles button.off { opacity: .45; }
+  .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<button id="parentBtn" aria-label="Grown-up settings (press and hold)">⚙️<span class="ring"></span></button>
+
+<div id="panel">
+  <div class="card">
+    <h2>Grown-up settings</h2>
+    <p>Tap or swipe the band. Every note fits, so there are no wrong notes. Press and hold the ⚙️ to get back here.</p>
+    <div class="label">Play-along beat</div>
+    <div class="modes">
+      <button data-beat="0">🤫 No beat</button>
+      <button data-beat="80">🐢 Slow beat</button>
+      <button data-beat="104">🐇 Bouncy beat</button>
+      <button data-beat="132">🚀 Dance beat</button>
+    </div>
+    <div class="label">How many in the band?</div>
+    <div class="modes">
+      <button data-size="4">4 friends (easier)</button>
+      <button data-size="6">6 friends</button>
+    </div>
+    <div class="label">Sound</div>
+    <div class="toggles">
+      <button id="tSound">🔊 Sounds</button>
+      <button id="tFull" style="grid-column: span 2">⛶ Full screen</button>
+    </div>
+    <button class="done" id="done">Let's play!</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ---------- The band ----------
+  // oct shifts the instrument up or down an octave from the middle of the scale
+  const BAND = [
+    { animal: '🐱', name: 'Cat',      inst: 'piano', badge: '🎹', color: '#ff6fc8', oct: 0 },
+    { animal: '🐸', name: 'Frog',     inst: 'drum',  badge: '🥁', color: '#34d058' },
+    { animal: '🐦', name: 'Bird',     inst: 'bells', badge: '🔔', color: '#f5c800', oct: 1 },
+    { animal: '🐻', name: 'Bear',     inst: 'bass',  badge: '🎸', color: '#ff9a1f', oct: -1 },
+    { animal: '🐘', name: 'Elephant', inst: 'horn',  badge: '🎺', color: '#a04dff', oct: 0 },
+    { animal: '🐵', name: 'Monkey',   inst: 'shaker', badge: '🎶', color: '#ff3b3b' },
+  ];
+  const BRIGHT = ['#ff3b3b', '#ff9a1f', '#f5c800', '#22b84a', '#2f7bff', '#a04dff', '#ff4fb0'];
+  const pick = a => a[(Math.random() * a.length) | 0];
+
+  // ---------- Settings (only settings are saved) ----------
+  const KEY = 'littleBand.kids.v1';
+  let settings = { beat: 0, size: 6, sound: true };
+  try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
+  const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
+
+  // ---------- Canvas ----------
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  let W = 0, H = 0;
+  function resize() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    layout();
+  }
+  const unit = () => Math.min(W, H);
+
+  // Big round players on a grid, kept away from the edges where wrists rest
+  let players = [];
+  function layout() {
+    const band = BAND.slice(0, settings.size);
+    const n = band.length, landscape = W > H;
+    const cols = n === 4 ? 2 : (landscape ? 3 : 2), rows = Math.ceil(n / cols);
+    const padX = Math.max(16, unit() * 0.06), top = Math.max(64, unit() * 0.1), bottom = Math.max(32, unit() * 0.1);
+    const cw = (W - padX * 2) / cols, ch = (H - top - bottom) / rows;
+    const r = Math.min(cw, ch) * 0.4;
+    const old = players;
+    players = band.map((b, i) => {
+      const prev = old.find(p => p.inst === b.inst);
+      return { ...b, x: padX + cw * (i % cols + 0.5), y: top + ch * (((i / cols) | 0) + 0.5), r,
+        bounce: prev ? prev.bounce : 0, step: prev ? prev.step : 2, bob: Math.random() * 6 };
+    });
+  }
+  addEventListener('resize', resize); resize();
+
+  // ---------- Audio: every instrument is made right here, no sound files ----------
+  let actx = null, master = null, noiseBuf = null;
+  function audio() {
+    if (!actx) {
+      try {
+        actx = new (window.AudioContext || window.webkitAudioContext)();
+        master = actx.createGain(); master.gain.value = 0.9; master.connect(actx.destination);
+        noiseBuf = actx.createBuffer(1, actx.sampleRate * 0.5, actx.sampleRate);
+        const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      } catch (e) {}
+    }
+    if (actx && actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  // Major pentatonic over two octaves, so any mashing sounds like a tune
+  const SCALE = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0];
+  function env(g, t, peak, attack, dur) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  }
+  function osc(type, freq, t, dur, peak, attack = 0.005, filter) {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    env(g, t, peak, attack, dur);
+    let node = o.connect(g);
+    if (filter) { const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = filter; g.connect(f); node = f; }
+    node.connect(master); o.start(t); o.stop(t + dur + 0.05);
+    return o;
+  }
+  function noise(t, dur, peak, type, freq) {
+    const s = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+    s.buffer = noiseBuf; f.type = type; f.frequency.value = freq;
+    env(g, t, peak, 0.003, dur);
+    s.connect(f).connect(g).connect(master); s.start(t); s.stop(t + dur + 0.05);
+  }
+  const INSTRUMENTS = {
+    piano(f, t) { osc('triangle', f, t, 0.9, 0.22); osc('sine', f * 2, t, 0.5, 0.06); },
+    bells(f, t) { osc('sine', f, t, 1.2, 0.16); osc('sine', f * 3.01, t, 0.5, 0.05); osc('sine', f * 5.4, t, 0.2, 0.02); },
+    bass(f, t) { osc('sawtooth', f, t, 0.5, 0.2, 0.005, 700); osc('sine', f, t, 0.6, 0.18); },
+    horn(f, t) { osc('square', f, t, 0.6, 0.1, 0.05, 1400); osc('sawtooth', f * 1.005, t, 0.6, 0.06, 0.05, 1200); },
+    drum(f, t) {
+      const o = osc('sine', 150, t, 0.35, 0.6);
+      o.frequency.exponentialRampToValueAtTime(50, t + 0.3);
+      noise(t, 0.08, 0.12, 'lowpass', 1200);
+    },
+    shaker(f, t) { noise(t, 0.12, 0.25, 'highpass', 5000); noise(t + 0.09, 0.08, 0.15, 'highpass', 6000); },
+  };
+  function playNote(p, t) {
+    if (!settings.sound || !audio()) return;
+    t = t ?? actx.currentTime;
+    if (p.oct === undefined) { INSTRUMENTS[p.inst](0, t); return; }
+    // wander through the scale a step or two at a time, so repeat taps make a melody
+    p.step = Math.max(0, Math.min(SCALE.length - 1, p.step + pick([-2, -1, 1, 1, 2])));
+    if (p.step === 0 || p.step === SCALE.length - 1) p.step = 4;
+    INSTRUMENTS[p.inst](SCALE[p.step] * 2 ** p.oct, t);
+  }
+
+  // ---------- Play-along beat (scheduled ahead on the audio clock so it never drifts) ----------
+  let nextBeat = 0, beatN = 0, beatPulse = 0;
+  const beatTimes = [];
+  function scheduleBeat() {
+    if (!settings.beat || !settings.sound || !actx || actx.state !== 'running') { nextBeat = 0; return; }
+    const spb = 60 / settings.beat / 2; // eighth notes
+    if (nextBeat < actx.currentTime) { nextBeat = actx.currentTime + 0.05; beatN = 0; }
+    while (nextBeat < actx.currentTime + 0.12) {
+      const t = nextBeat;
+      if (beatN % 4 === 0) { const o = osc('sine', 120, t, 0.25, 0.35); o.frequency.exponentialRampToValueAtTime(45, t + 0.2); beatTimes.push(t); }
+      if (beatN % 4 === 2) noise(t, 0.1, 0.08, 'bandpass', 1800);
+      noise(t, 0.04, 0.03, 'highpass', 7000);
+      nextBeat += spb; beatN++;
+    }
+  }
+  setInterval(scheduleBeat, 25);
+
+  // ---------- Effects ----------
+  const notes = [], confetti = [];
+  let played = 0;
+  function hitPlayer(p) {
+    playNote(p);
+    p.bounce = 1;
+    played++;
+    notes.push({ x: p.x + (Math.random() - 0.5) * p.r, y: p.y - p.r * 0.8, vx: (Math.random() - 0.5) * 40, t: 0,
+      glyph: pick(['♪', '♫', '♩', '♬']), color: p.color, size: p.r * (0.35 + Math.random() * 0.2) });
+    if (played % 30 === 0) celebrate();
+  }
+  function celebrate() {
+    if (settings.sound && audio()) { const t = actx.currentTime + 0.3; [5, 7, 8, 9].forEach((n, i) => INSTRUMENTS.bells(SCALE[n], t + i * 0.1)); }
+    for (let k = 0; k < 100; k++) {
+      confetti.push({ x: Math.random() * W, y: -20 - Math.random() * H * 0.5, vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 160,
+        rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10, w: 8 + Math.random() * 8, h: 5 + Math.random() * 5, color: pick(BRIGHT), t: 0 });
+    }
+  }
+
+  // ---------- Input: tap a friend to play; slide a finger across the band to strum ----------
+  const over = new Map(); // pointerId -> player the finger is on
+  function playerAt(x, y) {
+    // generous hit zone for small, imprecise fingers
+    return players.find(p => (p.x - x) ** 2 + (p.y - y) ** 2 <= (p.r * 1.1 + 10) ** 2) || null;
+  }
+  cv.addEventListener('pointerdown', e => {
+    e.preventDefault(); audio();
+    const p = playerAt(e.clientX, e.clientY);
+    over.set(e.pointerId, p);
+    if (p) hitPlayer(p);
+  });
+  cv.addEventListener('pointermove', e => {
+    if (!over.has(e.pointerId)) return;
+    const p = playerAt(e.clientX, e.clientY);
+    if (p && p !== over.get(e.pointerId)) hitPlayer(p);
+    over.set(e.pointerId, p);
+  });
+  const lift = e => over.delete(e.pointerId);
+  addEventListener('pointerup', lift); addEventListener('pointercancel', lift);
+  addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('gesturestart', e => e.preventDefault()); // iOS pinch zoom
+
+  // ---------- Drawing ----------
+  function drawPlayer(p, now) {
+    // gentle idle bob, a squash-and-stretch bounce when played, and a nod on each beat
+    const bob = Math.sin(now / 500 + p.bob) * p.r * 0.03;
+    const sq = p.bounce * Math.sin(p.bounce * Math.PI * 3) * 0.12;
+    const nod = beatPulse * 0.05;
+    ctx.save(); ctx.translate(p.x, p.y + bob - p.bounce * p.r * 0.12);
+    ctx.scale(1 + sq + nod, 1 - sq + nod);
+    // shadow
+    ctx.fillStyle = 'rgba(43,45,92,.15)';
+    ctx.beginPath(); ctx.ellipse(0, p.r * 1.02, p.r * 0.8, p.r * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+    // stage circle
+    const g = ctx.createRadialGradient(-p.r * 0.3, -p.r * 0.35, p.r * 0.1, 0, 0, p.r);
+    g.addColorStop(0, '#fff'); g.addColorStop(0.25, p.color); g.addColorStop(1, p.color);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = Math.max(4, p.r * 0.06); ctx.strokeStyle = '#fff'; ctx.stroke();
+    // the animal and its instrument
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `${p.r * 1.05}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    ctx.fillText(p.animal, 0, -p.r * 0.05);
+    ctx.font = `${p.r * 0.5}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    ctx.fillText(p.badge, p.r * 0.62, p.r * 0.6);
+    ctx.restore();
+  }
+
+  let last = performance.now();
+  function update(dt) {
+    for (const p of players) p.bounce = Math.max(0, p.bounce - dt * 2.2);
+    // light up the band on the beat as the audio clock reaches it
+    if (actx) while (beatTimes.length && beatTimes[0] <= actx.currentTime) { beatTimes.shift(); beatPulse = 1; }
+    beatPulse = Math.max(0, beatPulse - dt * 4);
+    for (let i = notes.length - 1; i >= 0; i--) {
+      const n = notes[i]; n.t += dt; n.y -= unit() * 0.18 * dt; n.x += (n.vx + Math.sin(n.t * 6) * 30) * dt;
+      if (n.t > 1.4) notes.splice(i, 1);
+    }
+    for (let i = confetti.length - 1; i >= 0; i--) {
+      const c = confetti[i]; c.t += dt; c.x += (c.vx + Math.sin(c.t * 3 + c.rot) * 40) * dt; c.y += c.vy * dt; c.rot += c.vr * dt;
+      if (c.y > H + 30) confetti.splice(i, 1);
+    }
+  }
+  function draw() {
+    const now = performance.now();
+    ctx.clearRect(0, 0, W, H);
+    for (const p of players) drawPlayer(p, now);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const n of notes) {
+      ctx.globalAlpha = Math.max(0, 1 - n.t / 1.4);
+      ctx.font = `900 ${n.size}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
+      ctx.lineWidth = n.size * 0.12; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round';
+      ctx.strokeText(n.glyph, n.x, n.y); ctx.fillStyle = n.color; ctx.fillText(n.glyph, n.x, n.y);
+    }
+    ctx.globalAlpha = 1;
+    for (const c of confetti) {
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot); ctx.fillStyle = c.color;
+      ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h); ctx.restore();
+    }
+  }
+  function loop(t) {
+    const dt = Math.min(0.05, (t - last) / 1000); last = t;
+    update(dt); draw(); requestAnimationFrame(loop);
+  }
+
+  // ---------- Grown-up panel (press & hold 1.5s) ----------
+  const pb = document.getElementById('parentBtn'), panel = document.getElementById('panel');
+  let holdTimer = null;
+  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); holdTimer = setTimeout(openPanel, 1500); };
+  const endHold = () => { pb.classList.remove('holding'); clearTimeout(holdTimer); };
+  pb.addEventListener('pointerdown', startHold);
+  pb.addEventListener('pointerup', endHold); pb.addEventListener('pointerleave', endHold); pb.addEventListener('pointercancel', endHold);
+
+  function openPanel() { endHold(); syncPanel(); panel.classList.add('open'); }
+  function syncPanel() {
+    document.querySelectorAll('[data-beat]').forEach(b => b.classList.toggle('on', +b.dataset.beat === settings.beat));
+    document.querySelectorAll('[data-size]').forEach(b => b.classList.toggle('on', +b.dataset.size === settings.size));
+    document.getElementById('tSound').classList.toggle('off', !settings.sound);
+  }
+  document.querySelectorAll('[data-beat]').forEach(b => b.onclick = () => { settings.beat = +b.dataset.beat; saveSettings(); syncPanel(); audio(); });
+  document.querySelectorAll('[data-size]').forEach(b => b.onclick = () => { settings.size = +b.dataset.size; saveSettings(); syncPanel(); layout(); });
+  document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
+  document.getElementById('tFull').onclick = () => {
+    const el = document.documentElement;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
+  };
+  document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
+
+  requestAnimationFrame(loop);
+
+  // Offline support (only works over HTTPS or localhost)
+  if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
