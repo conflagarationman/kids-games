@@ -6,7 +6,7 @@ Simple, touch-friendly web games for little kids. Each game is a self-contained 
 
 - [`bubble-pop/`](bubble-pop/) — **Bubble Pop!** Pop floating bubbles to reveal animals, colors, letters, numbers or shapes, with sounds and a spoken name. Press and hold ⚙️ for 1.5s to open grown-up settings (content, sound/voice, speed).
 - [`magic-paint/`](magic-paint/) — **Magic Paint!** Drag to finger paint (every finger at once), tap to drop a wiggling stamp. Grown-up settings: rainbow or crayon colors, stamp set, day or glowing night paper, save the picture, clear the page.
-- [`little-band/`](little-band/) — **Little Band!** Six animal musicians (piano, drums, bells, bass, horn, shaker). Tap or swipe across them to play; every note is in the same five-note scale, so nothing sounds wrong. Grown-up settings: a play-along beat at three speeds, and a 4-friend band for little ones.
+- [`little-band/`](little-band/) — **Little Band!** A real, playable keyboard (white and black keys, chords, hold to sustain, slide to run up and down). Tap 🎹 🔔 🎸 🎺 to change the keyboard's sound, or the 🥁 and 👏 pads for rhythm. White keys carry classroom bell colors (C red, D orange, E yellow…) so songs can be taught by color. Grown-up settings: a play-along beat at three speeds, color dots or note letters on the keys, and 1 or 2 octaves.
 
 All games share the same rules: tap and swipe only, nothing to fail, and settings behind a 1.5s press-and-hold on ⚙️ so little fingers don't open them.
 

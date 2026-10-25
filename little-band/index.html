@@ -45,7 +45,7 @@
 <div id="panel">
   <div class="card">
     <h2>Grown-up settings</h2>
-    <p>Tap or swipe the band. Every note fits, so there are no wrong notes. Press and hold the ⚙️ to get back here.</p>
+    <p>A real keyboard: hold a key to keep the note ringing, slide along to run up and down. Tap 🎹 🔔 🎸 🎺 to change the sound. Press and hold the ⚙️ to get back here.</p>
     <div class="label">Play-along beat</div>
     <div class="modes">
       <button data-beat="0">🤫 No beat</button>
@@ -53,10 +53,15 @@
       <button data-beat="104">🐇 Bouncy beat</button>
       <button data-beat="132">🚀 Dance beat</button>
     </div>
-    <div class="label">How many in the band?</div>
+    <div class="label">On the keys</div>
     <div class="modes">
-      <button data-size="4">4 friends (easier)</button>
-      <button data-size="6">6 friends</button>
+      <button data-labels="colors">🌈 Color dots</button>
+      <button data-labels="letters">🔤 Note letters</button>
+    </div>
+    <div class="label">How many keys?</div>
+    <div class="modes">
+      <button data-range="1">1 octave (bigger keys)</button>
+      <button data-range="2">2 octaves</button>
     </div>
     <div class="label">Sound</div>
     <div class="toggles">
@@ -69,54 +74,11 @@
 
 <script>
 (() => {
-  // ---------- The band ----------
-  // oct shifts the instrument up or down an octave from the middle of the scale
-  const BAND = [
-    { animal: '🐱', name: 'Cat',      inst: 'piano', badge: '🎹', color: '#ff6fc8', oct: 0 },
-    { animal: '🐸', name: 'Frog',     inst: 'drum',  badge: '🥁', color: '#34d058' },
-    { animal: '🐦', name: 'Bird',     inst: 'bells', badge: '🔔', color: '#f5c800', oct: 1 },
-    { animal: '🐻', name: 'Bear',     inst: 'bass',  badge: '🎸', color: '#ff9a1f', oct: -1 },
-    { animal: '🐘', name: 'Elephant', inst: 'horn',  badge: '🎺', color: '#a04dff', oct: 0 },
-    { animal: '🐵', name: 'Monkey',   inst: 'shaker', badge: '🎶', color: '#ff3b3b' },
-  ];
-  const BRIGHT = ['#ff3b3b', '#ff9a1f', '#f5c800', '#22b84a', '#2f7bff', '#a04dff', '#ff4fb0'];
-  const pick = a => a[(Math.random() * a.length) | 0];
-
   // ---------- Settings (only settings are saved) ----------
-  const KEY = 'littleBand.kids.v1';
-  let settings = { beat: 0, size: 6, sound: true };
+  const KEY = 'littleBand.kids.v2';
+  let settings = { beat: 0, labels: 'colors', range: 0, sound: true, voice: 'piano' };
   try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
   const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
-
-  // ---------- Canvas ----------
-  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-  let W = 0, H = 0;
-  function resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 2);
-    W = innerWidth; H = innerHeight;
-    cv.width = W * dpr; cv.height = H * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    layout();
-  }
-  const unit = () => Math.min(W, H);
-
-  // Big round players on a grid, kept away from the edges where wrists rest
-  let players = [];
-  function layout() {
-    const band = BAND.slice(0, settings.size);
-    const n = band.length, landscape = W > H;
-    const cols = n === 4 ? 2 : (landscape ? 3 : 2), rows = Math.ceil(n / cols);
-    const padX = Math.max(16, unit() * 0.06), top = Math.max(64, unit() * 0.1), bottom = Math.max(32, unit() * 0.1);
-    const cw = (W - padX * 2) / cols, ch = (H - top - bottom) / rows;
-    const r = Math.min(cw, ch) * 0.4;
-    const old = players;
-    players = band.map((b, i) => {
-      const prev = old.find(p => p.inst === b.inst);
-      return { ...b, x: padX + cw * (i % cols + 0.5), y: top + ch * (((i / cols) | 0) + 0.5), r,
-        bounce: prev ? prev.bounce : 0, step: prev ? prev.step : 2, bob: Math.random() * 6 };
-    });
-  }
-  addEventListener('resize', resize); resize();
 
   // ---------- Audio: every instrument is made right here, no sound files ----------
   let actx = null, master = null, noiseBuf = null;
@@ -124,7 +86,7 @@
     if (!actx) {
       try {
         actx = new (window.AudioContext || window.webkitAudioContext)();
-        master = actx.createGain(); master.gain.value = 0.9; master.connect(actx.destination);
+        master = actx.createGain(); master.gain.value = 0.8; master.connect(actx.destination);
         noiseBuf = actx.createBuffer(1, actx.sampleRate * 0.5, actx.sampleRate);
         const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
       } catch (e) {}
@@ -132,21 +94,49 @@
     if (actx && actx.state === 'suspended') actx.resume();
     return actx;
   }
-  // Major pentatonic over two octaves, so any mashing sounds like a tune
-  const SCALE = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0];
+  const midiFreq = m => 440 * 2 ** ((m - 69) / 12);
+
+  // Keyboard sounds. Each note holds while the key is down and lets go when it lifts.
+  // parts: [wave, frequency multiple, level]; tau: how fast a held note fades (0 = keeps going)
+  const VOICES = {
+    piano: { icon: '🎹', parts: [['triangle', 1, 1], ['sine', 2, 0.3], ['sine', 3, 0.08]], peak: 0.3, attack: 0.005, tau: 0.7, release: 0.08 },
+    bells: { icon: '🔔', parts: [['sine', 2, 1], ['sine', 6.02, 0.25], ['sine', 10.8, 0.08]], peak: 0.22, attack: 0.003, tau: 1.1, release: 0.5 },
+    guitar: { icon: '🎸', parts: [['sawtooth', 0.5, 0.7], ['triangle', 0.5, 0.6]], peak: 0.28, attack: 0.004, tau: 0.45, release: 0.1, filter: 1600, sweep: 500 },
+    horn: { icon: '🎺', parts: [['square', 1, 0.6], ['sawtooth', 1.004, 0.5]], peak: 0.13, attack: 0.06, tau: 0, release: 0.1, filter: 1500 },
+  };
+  function startVoice(name, freq) {
+    const v = VOICES[name], t = actx.currentTime;
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(v.peak, t + v.attack);
+    if (v.tau) g.gain.setTargetAtTime(0, t + v.attack, v.tau);
+    let out = g;
+    if (v.filter) {
+      const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(v.filter, t);
+      if (v.sweep) f.frequency.setTargetAtTime(v.sweep, t, 0.15); // a pluck that mellows out
+      g.connect(f); out = f;
+    }
+    out.connect(master);
+    const oscs = v.parts.map(([type, mul, lvl]) => {
+      const o = actx.createOscillator(), og = actx.createGain();
+      o.type = type; o.frequency.value = freq * mul; og.gain.value = lvl;
+      o.connect(og).connect(g); o.start(t);
+      return o;
+    });
+    return {
+      stop() {
+        const now = actx.currentTime;
+        if (g.gain.cancelAndHoldAtTime) g.gain.cancelAndHoldAtTime(now);
+        else { g.gain.cancelScheduledValues(now); g.gain.setValueAtTime(g.gain.value, now); }
+        g.gain.setTargetAtTime(0, now, v.release);
+        oscs.forEach(o => o.stop(now + v.release * 8));
+      },
+    };
+  }
   function env(g, t, peak, attack, dur) {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(peak, t + attack);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  }
-  function osc(type, freq, t, dur, peak, attack = 0.005, filter) {
-    const o = actx.createOscillator(), g = actx.createGain();
-    o.type = type; o.frequency.setValueAtTime(freq, t);
-    env(g, t, peak, attack, dur);
-    let node = o.connect(g);
-    if (filter) { const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = filter; g.connect(f); node = f; }
-    node.connect(master); o.start(t); o.stop(t + dur + 0.05);
-    return o;
   }
   function noise(t, dur, peak, type, freq) {
     const s = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
@@ -154,27 +144,16 @@
     env(g, t, peak, 0.003, dur);
     s.connect(f).connect(g).connect(master); s.start(t); s.stop(t + dur + 0.05);
   }
-  const INSTRUMENTS = {
-    piano(f, t) { osc('triangle', f, t, 0.9, 0.22); osc('sine', f * 2, t, 0.5, 0.06); },
-    bells(f, t) { osc('sine', f, t, 1.2, 0.16); osc('sine', f * 3.01, t, 0.5, 0.05); osc('sine', f * 5.4, t, 0.2, 0.02); },
-    bass(f, t) { osc('sawtooth', f, t, 0.5, 0.2, 0.005, 700); osc('sine', f, t, 0.6, 0.18); },
-    horn(f, t) { osc('square', f, t, 0.6, 0.1, 0.05, 1400); osc('sawtooth', f * 1.005, t, 0.6, 0.06, 0.05, 1200); },
-    drum(f, t) {
-      const o = osc('sine', 150, t, 0.35, 0.6);
-      o.frequency.exponentialRampToValueAtTime(50, t + 0.3);
-      noise(t, 0.08, 0.12, 'lowpass', 1200);
-    },
-    shaker(f, t) { noise(t, 0.12, 0.25, 'highpass', 5000); noise(t + 0.09, 0.08, 0.15, 'highpass', 6000); },
-  };
-  function playNote(p, t) {
-    if (!settings.sound || !audio()) return;
-    t = t ?? actx.currentTime;
-    if (p.oct === undefined) { INSTRUMENTS[p.inst](0, t); return; }
-    // wander through the scale a step or two at a time, so repeat taps make a melody
-    p.step = Math.max(0, Math.min(SCALE.length - 1, p.step + pick([-2, -1, 1, 1, 2])));
-    if (p.step === 0 || p.step === SCALE.length - 1) p.step = 4;
-    INSTRUMENTS[p.inst](SCALE[p.step] * 2 ** p.oct, t);
+  function kick(t, peak = 0.6) {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.3);
+    env(g, t, peak, 0.005, 0.35);
+    o.connect(g).connect(master); o.start(t); o.stop(t + 0.4);
   }
+  const PADS = {
+    drum(t) { kick(t); noise(t, 0.08, 0.12, 'lowpass', 1200); },
+    clap(t) { [0, 0.012, 0.026].forEach(d => noise(t + d, 0.09, 0.35, 'bandpass', 1500)); },
+  };
 
   // ---------- Play-along beat (scheduled ahead on the audio clock so it never drifts) ----------
   let nextBeat = 0, beatN = 0, beatPulse = 0;
@@ -185,7 +164,7 @@
     if (nextBeat < actx.currentTime) { nextBeat = actx.currentTime + 0.05; beatN = 0; }
     while (nextBeat < actx.currentTime + 0.12) {
       const t = nextBeat;
-      if (beatN % 4 === 0) { const o = osc('sine', 120, t, 0.25, 0.35); o.frequency.exponentialRampToValueAtTime(45, t + 0.2); beatTimes.push(t); }
+      if (beatN % 4 === 0) { kick(t, 0.35); beatTimes.push(t); }
       if (beatN % 4 === 2) noise(t, 0.1, 0.08, 'bandpass', 1800);
       noise(t, 0.04, 0.03, 'highpass', 7000);
       nextBeat += spb; beatN++;
@@ -193,104 +172,189 @@
   }
   setInterval(scheduleBeat, 25);
 
-  // ---------- Effects ----------
-  const notes = [], confetti = [];
-  let played = 0;
-  function hitPlayer(p) {
-    playNote(p);
-    p.bounce = 1;
-    played++;
-    notes.push({ x: p.x + (Math.random() - 0.5) * p.r, y: p.y - p.r * 0.8, vx: (Math.random() - 0.5) * 40, t: 0,
-      glyph: pick(['♪', '♫', '♩', '♬']), color: p.color, size: p.r * (0.35 + Math.random() * 0.2) });
-    if (played % 30 === 0) celebrate();
-  }
-  function celebrate() {
-    if (settings.sound && audio()) { const t = actx.currentTime + 0.3; [5, 7, 8, 9].forEach((n, i) => INSTRUMENTS.bells(SCALE[n], t + i * 0.1)); }
-    for (let k = 0; k < 100; k++) {
-      confetti.push({ x: Math.random() * W, y: -20 - Math.random() * H * 0.5, vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 160,
-        rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10, w: 8 + Math.random() * 8, h: 5 + Math.random() * 5, color: pick(BRIGHT), t: 0 });
+  // ---------- Canvas & layout ----------
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  let W = 0, H = 0;
+  const unit = () => Math.min(W, H);
+
+  // Classroom bell colors for C D E F G A B, so a song can be taught by color
+  const NOTE_COLORS = ['#ff3b3b', '#ff9a1f', '#f5c800', '#22b84a', '#2f9bff', '#7a4dff', '#ff4fb0'];
+  const NOTE_NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+  const WHITE_STEPS = [0, 2, 4, 5, 7, 9, 11];
+  const HAS_BLACK = [true, true, false, true, true, true, false]; // a black key sits after C D F G A
+
+  let keys = [], buttons = [];
+  function layout() {
+    const padX = Math.max(12, W * 0.03);
+    // instrument row up top, clear of the ⚙️ corner
+    const stripTop = Math.max(64, H * 0.07), stripH = Math.max(60, Math.min(110, unit() * 0.16));
+    const order = ['drum', 'piano', 'bells', 'guitar', 'horn', 'clap'];
+    const cw = (W - padX * 2) / order.length;
+    const r = Math.min(stripH / 2, cw / 2) * 0.86;
+    const oldBtn = buttons;
+    buttons = order.map((id, i) => ({ id, x: padX + cw * (i + 0.5), y: stripTop + stripH / 2, r,
+      icon: id === 'drum' ? '🥁' : id === 'clap' ? '👏' : VOICES[id].icon, pad: !VOICES[id],
+      bounce: (oldBtn.find(b => b.id === id) || {}).bounce || 0 }));
+
+    // the keyboard fills the rest, kept off the very bottom edge where wrists rest
+    const top = stripTop + stripH + Math.max(14, H * 0.03), bottom = H - Math.max(20, H * 0.05);
+    // pick a range that keeps white keys wide enough for small fingers
+    const auto = (W - padX * 2) / 15 >= 52 ? 2 : 1;
+    const octaves = settings.range || auto;
+    const nWhite = octaves * 7 + 1; // end on the top C
+    const ww = (W - padX * 2) / nWhite, kh = bottom - top;
+    keys = [];
+    for (let i = 0; i < nWhite; i++) {
+      const deg = i % 7, oct = (i / 7) | 0, midi = 60 + oct * 12 + WHITE_STEPS[deg];
+      keys.push({ white: true, midi, deg, x: padX + i * ww, y: top, w: ww, h: kh, color: NOTE_COLORS[deg], name: NOTE_NAMES[deg] });
+    }
+    for (let i = 0; i < nWhite - 1; i++) {
+      const deg = i % 7; if (!HAS_BLACK[deg]) continue;
+      const bw = ww * 0.6, midi = keys[i].midi + 1;
+      keys.push({ white: false, midi, deg, x: padX + (i + 1) * ww - bw / 2, y: top, w: bw, h: kh * 0.6, color: NOTE_COLORS[deg] });
     }
   }
-
-  // ---------- Input: tap a friend to play; slide a finger across the band to strum ----------
-  const over = new Map(); // pointerId -> player the finger is on
-  function playerAt(x, y) {
-    // generous hit zone for small, imprecise fingers
-    return players.find(p => (p.x - x) ** 2 + (p.y - y) ** 2 <= (p.r * 1.1 + 10) ** 2) || null;
+  function resize() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    releaseAll(); layout();
   }
+
+  // ---------- Playing ----------
+  const fingers = new Map(); // pointerId -> { key, voice } or { button }
+  const held = new Map();    // midi -> how many fingers are on it (for drawing)
+  const notes = [];
+
+  function keyAt(x, y) {
+    // black keys sit on top, so check them first
+    for (const k of keys) if (!k.white && x >= k.x && x < k.x + k.w && y >= k.y && y < k.y + k.h) return k;
+    for (const k of keys) if (k.white && x >= k.x && x < k.x + k.w && y >= k.y - 8 && y < k.y + k.h + 16) return k;
+    return null;
+  }
+  function buttonAt(x, y) {
+    return buttons.find(b => (b.x - x) ** 2 + (b.y - y) ** 2 <= (b.r + 10) ** 2) || null;
+  }
+  function pressKey(k) {
+    held.set(k.midi, (held.get(k.midi) || 0) + 1);
+    notes.push({ x: k.x + k.w / 2, y: k.y - 6, vx: (Math.random() - 0.5) * 40, t: 0, color: k.color,
+      glyph: ['♪', '♫', '♩', '♬'][(Math.random() * 4) | 0], size: Math.max(22, unit() * 0.06) });
+    if (!settings.sound || !audio()) return null;
+    return startVoice(settings.voice, midiFreq(k.midi));
+  }
+  function releaseKey(f) {
+    if (!f || !f.key) return;
+    const n = (held.get(f.key.midi) || 1) - 1;
+    n ? held.set(f.key.midi, n) : held.delete(f.key.midi);
+    if (f.voice) f.voice.stop();
+  }
+  function releaseAll() { for (const f of fingers.values()) releaseKey(f); fingers.clear(); held.clear(); }
+
+  function tapButton(b) {
+    b.bounce = 1;
+    if (!audio()) return;
+    if (b.pad) { if (settings.sound) PADS[b.id](actx.currentTime); return; }
+    settings.voice = b.id; saveSettings();
+    // a quick hello in the new sound
+    if (settings.sound) { const v = startVoice(b.id, midiFreq(67)); setTimeout(() => v.stop(), 250); }
+  }
+
   cv.addEventListener('pointerdown', e => {
     e.preventDefault(); audio();
-    const p = playerAt(e.clientX, e.clientY);
-    over.set(e.pointerId, p);
-    if (p) hitPlayer(p);
+    const b = buttonAt(e.clientX, e.clientY);
+    if (b) { tapButton(b); fingers.set(e.pointerId, { button: b }); return; }
+    const k = keyAt(e.clientX, e.clientY);
+    fingers.set(e.pointerId, k ? { key: k, voice: pressKey(k) } : {});
   });
   cv.addEventListener('pointermove', e => {
-    if (!over.has(e.pointerId)) return;
-    const p = playerAt(e.clientX, e.clientY);
-    if (p && p !== over.get(e.pointerId)) hitPlayer(p);
-    over.set(e.pointerId, p);
+    const f = fingers.get(e.pointerId);
+    if (!f || f.button) return;
+    // slide along the keys: let go of the old note, play the new one
+    const k = keyAt(e.clientX, e.clientY);
+    if (k === (f.key || null)) return;
+    releaseKey(f);
+    fingers.set(e.pointerId, k ? { key: k, voice: pressKey(k) } : {});
   });
-  const lift = e => over.delete(e.pointerId);
+  const lift = e => { releaseKey(fingers.get(e.pointerId)); fingers.delete(e.pointerId); };
   addEventListener('pointerup', lift); addEventListener('pointercancel', lift);
+  addEventListener('blur', releaseAll);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
   addEventListener('contextmenu', e => e.preventDefault());
   document.addEventListener('gesturestart', e => e.preventDefault()); // iOS pinch zoom
 
+  addEventListener('resize', resize); resize();
+
   // ---------- Drawing ----------
-  function drawPlayer(p, now) {
-    // gentle idle bob, a squash-and-stretch bounce when played, and a nod on each beat
-    const bob = Math.sin(now / 500 + p.bob) * p.r * 0.03;
-    const sq = p.bounce * Math.sin(p.bounce * Math.PI * 3) * 0.12;
-    const nod = beatPulse * 0.05;
-    ctx.save(); ctx.translate(p.x, p.y + bob - p.bounce * p.r * 0.12);
-    ctx.scale(1 + sq + nod, 1 - sq + nod);
-    // shadow
-    ctx.fillStyle = 'rgba(43,45,92,.15)';
-    ctx.beginPath(); ctx.ellipse(0, p.r * 1.02, p.r * 0.8, p.r * 0.12, 0, 0, Math.PI * 2); ctx.fill();
-    // stage circle
-    const g = ctx.createRadialGradient(-p.r * 0.3, -p.r * 0.35, p.r * 0.1, 0, 0, p.r);
-    g.addColorStop(0, '#fff'); g.addColorStop(0.25, p.color); g.addColorStop(1, p.color);
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.fill();
-    ctx.lineWidth = Math.max(4, p.r * 0.06); ctx.strokeStyle = '#fff'; ctx.stroke();
-    // the animal and its instrument
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.closePath();
+  }
+  function drawButton(b) {
+    const on = !b.pad && settings.voice === b.id;
+    const s = 1 + Math.sin(b.bounce * Math.PI) * 0.15 + (b.pad ? beatPulse * 0.06 : 0);
+    ctx.save(); ctx.translate(b.x, b.y); ctx.scale(s, s);
+    ctx.fillStyle = on ? '#fff' : 'rgba(255,255,255,.45)';
+    ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2); ctx.fill();
+    if (on) { ctx.lineWidth = Math.max(4, b.r * 0.1); ctx.strokeStyle = '#ff6fb1'; ctx.stroke(); }
+    ctx.globalAlpha = on || b.pad ? 1 : 0.7;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `${p.r * 1.05}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
-    ctx.fillText(p.animal, 0, -p.r * 0.05);
-    ctx.font = `${p.r * 0.5}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
-    ctx.fillText(p.badge, p.r * 0.62, p.r * 0.6);
+    ctx.font = `${b.r * 1.1}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    ctx.fillText(b.icon, 0, b.r * 0.06);
     ctx.restore();
+  }
+  function drawKey(k) {
+    const down = held.has(k.midi), r = Math.min(12, k.w * 0.18);
+    const dy = down ? 4 : 0;
+    if (k.white) {
+      ctx.fillStyle = down ? k.color : '#fffdf8';
+      roundRect(k.x + 2, k.y + dy, k.w - 4, k.h - dy, r); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(43,45,92,.25)'; ctx.stroke();
+      // the label sits near the bottom where a finger doesn't cover it
+      const cx = k.x + k.w / 2, cy = k.y + k.h - Math.min(k.w * 0.5, k.h * 0.12);
+      if (settings.labels === 'letters') {
+        ctx.font = `900 ${Math.min(k.w * 0.5, 34)}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = down ? '#fff' : k.color; ctx.fillText(k.name, cx, cy);
+      } else {
+        ctx.fillStyle = down ? '#fff' : k.color;
+        ctx.beginPath(); ctx.arc(cx, cy, Math.min(k.w * 0.22, 18), 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      ctx.fillStyle = down ? k.color : '#2b2d5c';
+      roundRect(k.x, k.y + dy, k.w, k.h - dy, r * 0.7); ctx.fill();
+      // a darker shade when pressed, so it doesn't merge with the white key next to it
+      if (down) { ctx.fillStyle = 'rgba(43,45,92,.35)'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#2b2d5c'; ctx.stroke(); }
+      if (!down) { ctx.fillStyle = 'rgba(255,255,255,.18)'; roundRect(k.x + k.w * 0.18, k.y + 4, k.w * 0.64, k.h * 0.75, r * 0.5); ctx.fill(); }
+    }
   }
 
   let last = performance.now();
   function update(dt) {
-    for (const p of players) p.bounce = Math.max(0, p.bounce - dt * 2.2);
-    // light up the band on the beat as the audio clock reaches it
+    for (const b of buttons) b.bounce = Math.max(0, b.bounce - dt * 3);
+    // pulse the drum and clap pads on the beat as the audio clock reaches it
     if (actx) while (beatTimes.length && beatTimes[0] <= actx.currentTime) { beatTimes.shift(); beatPulse = 1; }
     beatPulse = Math.max(0, beatPulse - dt * 4);
     for (let i = notes.length - 1; i >= 0; i--) {
-      const n = notes[i]; n.t += dt; n.y -= unit() * 0.18 * dt; n.x += (n.vx + Math.sin(n.t * 6) * 30) * dt;
-      if (n.t > 1.4) notes.splice(i, 1);
-    }
-    for (let i = confetti.length - 1; i >= 0; i--) {
-      const c = confetti[i]; c.t += dt; c.x += (c.vx + Math.sin(c.t * 3 + c.rot) * 40) * dt; c.y += c.vy * dt; c.rot += c.vr * dt;
-      if (c.y > H + 30) confetti.splice(i, 1);
+      const n = notes[i]; n.t += dt; n.y -= unit() * 0.15 * dt; n.x += (n.vx + Math.sin(n.t * 6) * 30) * dt;
+      if (n.t > 1.1) notes.splice(i, 1);
     }
   }
   function draw() {
-    const now = performance.now();
     ctx.clearRect(0, 0, W, H);
-    for (const p of players) drawPlayer(p, now);
+    for (const b of buttons) drawButton(b);
+    for (const k of keys) if (k.white) drawKey(k);
+    for (const k of keys) if (!k.white) drawKey(k);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const n of notes) {
-      ctx.globalAlpha = Math.max(0, 1 - n.t / 1.4);
+      ctx.globalAlpha = Math.max(0, 1 - n.t / 1.1);
       ctx.font = `900 ${n.size}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
       ctx.lineWidth = n.size * 0.12; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round';
       ctx.strokeText(n.glyph, n.x, n.y); ctx.fillStyle = n.color; ctx.fillText(n.glyph, n.x, n.y);
     }
     ctx.globalAlpha = 1;
-    for (const c of confetti) {
-      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot); ctx.fillStyle = c.color;
-      ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h); ctx.restore();
-    }
   }
   function loop(t) {
     const dt = Math.min(0.05, (t - last) / 1000); last = t;
@@ -305,14 +369,17 @@
   pb.addEventListener('pointerdown', startHold);
   pb.addEventListener('pointerup', endHold); pb.addEventListener('pointerleave', endHold); pb.addEventListener('pointercancel', endHold);
 
-  function openPanel() { endHold(); syncPanel(); panel.classList.add('open'); }
+  function openPanel() { endHold(); releaseAll(); syncPanel(); panel.classList.add('open'); }
   function syncPanel() {
     document.querySelectorAll('[data-beat]').forEach(b => b.classList.toggle('on', +b.dataset.beat === settings.beat));
-    document.querySelectorAll('[data-size]').forEach(b => b.classList.toggle('on', +b.dataset.size === settings.size));
+    document.querySelectorAll('[data-labels]').forEach(b => b.classList.toggle('on', b.dataset.labels === settings.labels));
+    const range = settings.range || ((W - Math.max(12, W * 0.03) * 2) / 15 >= 52 ? 2 : 1);
+    document.querySelectorAll('[data-range]').forEach(b => b.classList.toggle('on', +b.dataset.range === range));
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
   }
   document.querySelectorAll('[data-beat]').forEach(b => b.onclick = () => { settings.beat = +b.dataset.beat; saveSettings(); syncPanel(); audio(); });
-  document.querySelectorAll('[data-size]').forEach(b => b.onclick = () => { settings.size = +b.dataset.size; saveSettings(); syncPanel(); layout(); });
+  document.querySelectorAll('[data-labels]').forEach(b => b.onclick = () => { settings.labels = b.dataset.labels; saveSettings(); syncPanel(); });
+  document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { settings.range = +b.dataset.range; saveSettings(); layout(); syncPanel(); });
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
   document.getElementById('tFull').onclick = () => {
     const el = document.documentElement;
