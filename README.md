@@ -12,4 +12,8 @@ Simple, touch-friendly web games for little kids. Each game is a self-contained 
 python3 -m http.server 8777
 ```
 
-Then open http://localhost:8777/bubble-pop/. Offline support (service worker) only turns on over HTTPS or localhost.
+Then open http://localhost:8777/. Offline support (service worker) only turns on over HTTPS or localhost.
+
+## Live site
+
+Published with GitHub Pages from `main`: https://conflagarationman.github.io/kids-games/
