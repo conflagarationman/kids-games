@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Bubble Pop!</title>
@@ -18,7 +18,7 @@
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
 
   /* Parent button: small, faded, needs a long press so little fingers don't open it */
-  #parentBtn { position: fixed; top: 10px; right: 10px; width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 3; touch-action: none; }
+  #parentBtn { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 3; touch-action: none; }
   #parentBtn .ring { position: absolute; inset: -4px; border-radius: 50%; border: 4px solid #ff6fb1; clip-path: inset(0 0 100% 0); }
   #parentBtn.holding .ring { animation: fill 1.5s linear forwards; }
   @keyframes fill { to { clip-path: inset(0 0 0 0); } }
@@ -93,15 +93,22 @@
     V:'Van', W:'Whale', X:'Fox', Y:'Yo-yo', Z:'Zebra' };
   const BRIGHT = ['#ff3b3b', '#ff9a1f', '#f5c800', '#22b84a', '#2f7bff', '#a04dff', '#ff4fb0'];
   const pick = a => a[(Math.random() * a.length) | 0];
+  // deal from a shuffled deck so the same thing doesn't come up five times in a row
+  const decks = new Map();
+  function deal(list) {
+    let d = decks.get(list);
+    if (!d || !d.length) { d = [...list].sort(() => Math.random() - 0.5); decks.set(list, d); }
+    return d.pop();
+  }
 
   function makeItem(mode) {
     if (mode === 'mix') mode = pick(['animals', 'animals', 'colors', 'letters', 'numbers', 'shapes']);
     switch (mode) {
-      case 'animals': { const [e, n, s] = pick(ANIMALS); return { kind: 'emoji', glyph: e, say: `${n}! ${s}` }; }
-      case 'colors':  { const [n, c] = pick(COLORS); return { kind: 'color', color: c, say: n + '!' }; }
-      case 'letters': { const l = pick(LETTERS); return { kind: 'text', glyph: l, color: pick(BRIGHT), say: `${l}! ${l} is for ${LETTER_WORDS[l]}` }; }
+      case 'animals': { const [e, n, s] = deal(ANIMALS); return { kind: 'emoji', glyph: e, say: `${n}! ${s}` }; }
+      case 'colors':  { const [n, c] = deal(COLORS); return { kind: 'color', color: c, say: n + '!' }; }
+      case 'letters': { const l = deal(LETTERS); return { kind: 'text', glyph: l, color: pick(BRIGHT), say: `${l}! ${l} is for ${LETTER_WORDS[l]}` }; }
       case 'numbers': { const n = 1 + ((Math.random() * 10) | 0); return { kind: 'text', glyph: String(n), color: pick(BRIGHT), say: n + '!', count: n }; }
-      case 'shapes':  { const s = pick(SHAPES); return { kind: 'shape', shape: s, color: pick(BRIGHT), say: s + '!' }; }
+      case 'shapes':  { const s = deal(SHAPES); return { kind: 'shape', shape: s, color: pick(BRIGHT), say: s + '!' }; }
     }
   }
 
@@ -109,7 +116,7 @@
   const KEY = 'bubblePop.kids.v1';
   let settings = { mode: 'animals', sound: true, voice: true, speed: 0.6 };
   try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
-  const saveSettings = () => localStorage.setItem(KEY, JSON.stringify(settings));
+  const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
 
   // ---------- Canvas ----------
   const cv = document.getElementById('c'), ctx = cv.getContext('2d');
@@ -183,13 +190,36 @@
   const bubbles = [], particles = [], reveals = [], confetti = [];
   let popCount = 0;
 
-  function spawnBubble(x, y) {
-    const r = unit() * (0.09 + Math.random() * 0.05);
+  // Bubble size has a floor for small fingers and a ceiling so big screens get more bubbles, not giant ones
+  const baseR = () => Math.max(36, Math.min(80, unit() * 0.095));
+  // about a fifth of the screen covered in bubbles, whatever its size
+  const maxBubbles = () => Math.max(8, Math.min(18, Math.round((W * H * 0.22) / (Math.PI * baseR() ** 2))));
+  // rise speed is a share of the screen height, so a trip takes the same time on a phone or a monitor
+  const RISE = [0.055, 0.095];
+  let spawned = 0;
+
+  // pick the spot along the bottom that is furthest from bubbles already rising there
+  function openX(r) {
+    let best = W / 2, bestGap = -Infinity;
+    for (let k = 0; k < 8; k++) {
+      const x = r + Math.random() * Math.max(1, W - 2 * r);
+      let gap = Infinity;
+      for (const b of bubbles) if (b.y > H * 0.55) gap = Math.min(gap, Math.abs(b.x - x) - b.r - r);
+      if (gap > bestGap) { bestGap = gap; best = x; }
+    }
+    return best;
+  }
+
+  function spawnBubble(x, y, opts = {}) {
+    // every so often a giant bubble that bursts into little ones
+    const giant = opts.giant ?? (++spawned % 11 === 0);
+    const r = opts.r ?? baseR() * (giant ? 1.75 : 0.8 + Math.random() * 0.45);
     bubbles.push({
-      x: x ?? (r + Math.random() * Math.max(1, W - 2 * r)),
+      x: x ?? openX(r),
       y: y ?? (H + r),
-      r, item: makeItem(settings.mode),
-      vy: -(unit() * (0.06 + Math.random() * 0.05)),
+      r, giant, item: makeItem(settings.mode),
+      vx: opts.vx || 0,
+      vy: opts.vy ?? -(H * (RISE[0] + Math.random() * (RISE[1] - RISE[0]))) * (giant ? 0.7 : 1),
       phase: Math.random() * Math.PI * 2,
       hue: (Math.random() * 360) | 0,
       born: performance.now(),
@@ -209,6 +239,13 @@
         t: 0, life: 0.6, r: 3 + Math.random() * 5, hue: (b.hue + k * 20) % 360 });
     }
     reveals.push({ x: b.x, y: b.y, r: b.r, item: b.item, t: 0 });
+    if (b.giant) {
+      // a giant bubble bursts into four little bubbles that scatter
+      for (let k = 0; k < 4; k++) {
+        const a = -Math.PI / 2 + (k - 1.5) * 0.9, sp = unit() * 0.5;
+        spawnBubble(b.x, b.y, { giant: false, r: baseR() * 0.7, vx: Math.cos(a) * sp, vy: -H * RISE[1] * 1.2 });
+      }
+    }
     if (popCount % 12 === 0) celebrate();
     // keep the screen lively: a fresh bubble arrives soon after each pop
     setTimeout(() => { if (bubbles.length < maxBubbles()) spawnBubble(); }, 400);
@@ -226,7 +263,6 @@
     }, 900);
   }
 
-  const maxBubbles = () => Math.max(5, Math.min(9, Math.round((W * H) / 90000)));
 
   // ---------- Input: every finger counts, swiping pops too ----------
   const down = new Set();
@@ -280,6 +316,7 @@
     ctx.save(); ctx.globalAlpha = alpha;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     if (item.kind === 'emoji') {
+      ctx.fillStyle = '#000'; // color emoji take on the fill's transparency, so keep it solid
       ctx.font = `${size * 1.2}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
       ctx.fillText(item.glyph, x, y + size * 0.08);
     } else if (item.kind === 'text') {
@@ -320,14 +357,25 @@
   function update(dt) {
     const sp = settings.speed;
     spawnT -= dt;
-    if (spawnT <= 0 && bubbles.length < maxBubbles()) { spawnBubble(); spawnT = (0.8 + Math.random() * 0.8) / sp; }
+    // the timer keeps a steady stream; the cap is only a ceiling for when lots of taps add extras
+    if (spawnT <= 0 && bubbles.length < maxBubbles() + 4) {
+      spawnBubble();
+      // space arrivals so the screen stays about full: one trip's time shared across the bubbles
+      const trip = 1 / ((RISE[0] + RISE[1]) / 2) / sp;
+      spawnT = (trip / maxBubbles()) * (0.6 + Math.random() * 0.8);
+    }
     for (let i = bubbles.length - 1; i >= 0; i--) {
       const b = bubbles[i];
       b.phase += dt * 1.5;
-      b.x += Math.sin(b.phase) * 20 * dt;
+      b.x += (Math.sin(b.phase) * 20 + b.vx) * dt;
+      b.vx *= 0.96; // the scatter from a giant pop slows to a drift
       b.y += b.vy * sp * dt;
       b.x = Math.max(b.r, Math.min(W - b.r, b.x));
       if (b.y < -b.r * 1.5) bubbles.splice(i, 1);
+    }
+    for (let i = 0; i < bubbles.length; i++) for (let j = i + 1; j < bubbles.length; j++) {
+      const a = bubbles[i], b = bubbles[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, overlap = a.r + b.r - d;
+      if (overlap > 0) { const push = Math.min(overlap, 120 * dt) / 2; a.x -= dx / d * push; b.x += dx / d * push; a.y -= dy / d * push * 0.5; b.y += dy / d * push * 0.5; }
     }
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i]; p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.93; p.vy *= 0.93;
@@ -414,7 +462,8 @@
   };
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
 
-  for (let i = 0; i < 4; i++) spawnBubble(undefined, H * (0.35 + Math.random() * 0.6));
+  // start with the sky already full
+  for (let i = 0, n = maxBubbles(); i < n; i++) spawnBubble(undefined, H * (0.1 + 0.9 * (i + Math.random()) / n), { giant: false });
   requestAnimationFrame(loop);
 
   // Offline support (only works over HTTPS or localhost)

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Little Band!</title>
@@ -15,10 +15,11 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   body { background: linear-gradient(180deg, #ffd88a 0%, #ffb3a7 55%, #c9b8ff 100%); }
+  :root { --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --sal: env(safe-area-inset-left); --sar: env(safe-area-inset-right); }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
 
   /* Parent button: small, faded, needs a long press so little fingers don't open it */
-  #parentBtn { position: fixed; top: 10px; right: 10px; width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 3; touch-action: none; }
+  #parentBtn { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 3; touch-action: none; }
   #parentBtn .ring { position: absolute; inset: -4px; border-radius: 50%; border: 4px solid #ff6fb1; clip-path: inset(0 0 100% 0); }
   #parentBtn.holding .ring { animation: fill 1.5s linear forwards; }
   @keyframes fill { to { clip-path: inset(0 0 0 0); } }
@@ -45,13 +46,21 @@
 <div id="panel">
   <div class="card">
     <h2>Grown-up settings</h2>
-    <p>A real keyboard: hold a key to keep the note ringing, slide along to run up and down. Tap 🎹 🔔 🎸 🎺 to change the sound. Press and hold the ⚙️ to get back here.</p>
+    <p>A real keyboard: hold a key to keep the note ringing, slide along to run up and down. Tap 🎹 🔔 🎸 🎺 to change the sound. With a song on, a star shows the next key; wrong keys just play. Press and hold the ⚙️ to get back here.</p>
     <div class="label">Play-along beat</div>
     <div class="modes">
       <button data-beat="0">🤫 No beat</button>
       <button data-beat="80">🐢 Slow beat</button>
       <button data-beat="104">🐇 Bouncy beat</button>
       <button data-beat="132">🚀 Dance beat</button>
+    </div>
+    <div class="label">Follow-the-lights song</div>
+    <div class="modes">
+      <button data-song="">🎹 Free play</button>
+      <button data-song="twinkle">⭐ Twinkle Twinkle</button>
+      <button data-song="mary">🐑 Mary's Lamb</button>
+      <button data-song="buns">🥐 Hot Cross Buns</button>
+      <button data-song="row" style="grid-column: span 2">🚣 Row Your Boat</button>
     </div>
     <div class="label">On the keys</div>
     <div class="modes">
@@ -76,7 +85,7 @@
 (() => {
   // ---------- Settings (only settings are saved) ----------
   const KEY = 'littleBand.kids.v2';
-  let settings = { beat: 0, labels: 'colors', range: 0, sound: true, voice: 'piano' };
+  let settings = { beat: 0, labels: 'colors', range: 0, sound: true, voice: 'piano', song: '' };
   try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
   const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
 
@@ -184,34 +193,48 @@
   const HAS_BLACK = [true, true, false, true, true, true, false]; // a black key sits after C D F G A
 
   let keys = [], buttons = [];
+  const inset = name => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+  const autoRange = () => (W - 2 * Math.max(12, W * 0.03)) / 15 >= 52 ? 2 : 1;
   function layout() {
-    const padX = Math.max(12, W * 0.03);
-    // instrument row up top, clear of the ⚙️ corner
-    const stripTop = Math.max(64, H * 0.07), stripH = Math.max(60, Math.min(110, unit() * 0.16));
+    const sl = inset('--sal'), sr = inset('--sar'), st = inset('--sat'), sb = inset('--sab');
+    const padX = Math.max(12, W * 0.03), left = padX + sl, right = W - padX - sr;
+    const octaves = settings.range || autoRange();
+    const nWhite = octaves * 7 + 1; // end on the top C
+    const ww = (right - left) / nWhite;
+    // keyboard sits low, within thumb reach, but off the very bottom edge where wrists rest
+    const bottom = H - Math.max(20, H * 0.05) - sb;
+    const portrait = H > W * 1.15;
+    // wide screens: the instrument row shares the top line with the ⚙️; tall screens start below it
+    const stripTop = (portrait ? Math.max(64, H * 0.07) : 10) + st;
+    // tall screens: keep keys piano-shaped instead of stretching them into sticks
+    const maxKey = portrait ? ww * 6 : Infinity;
+    const minStrip = portrait ? Math.min(260, H * 0.3) : Math.max(80, Math.min(130, H * 0.24));
+    const kh = Math.min(maxKey, bottom - stripTop - minStrip - Math.max(14, H * 0.03));
+    const top = bottom - kh;
+
+    // instrument buttons fill the space above: one row when wide, two rows of three when tall
     const order = ['drum', 'piano', 'bells', 'guitar', 'horn', 'clap'];
-    const cw = (W - padX * 2) / order.length;
-    const r = Math.min(stripH / 2, cw / 2) * 0.86;
+    const rows = portrait ? 2 : 1, cols = order.length / rows;
+    const areaH = top - Math.max(14, H * 0.03) - stripTop;
+    const cw = (right - left - (portrait ? 0 : 60)) / cols, rh = Math.min(areaH / rows, portrait ? 150 : Infinity);
+    const r = Math.min(rh / 2, cw / 2) * 0.82;
+    const y0 = stripTop + (areaH - rh * rows) / 2;
     const oldBtn = buttons;
-    buttons = order.map((id, i) => ({ id, x: padX + cw * (i + 0.5), y: stripTop + stripH / 2, r,
+    // portrait: drum and clap stacked on the left, the four sounds in a square beside them
+    const slot = portrait ? ['drum', 'piano', 'bells', 'clap', 'guitar', 'horn'] : order;
+    buttons = slot.map((id, i) => ({ id, x: left + cw * (i % cols + 0.5), y: y0 + rh * (((i / cols) | 0) + 0.5), r,
       icon: id === 'drum' ? '🥁' : id === 'clap' ? '👏' : VOICES[id].icon, pad: !VOICES[id],
       bounce: (oldBtn.find(b => b.id === id) || {}).bounce || 0 }));
 
-    // the keyboard fills the rest, kept off the very bottom edge where wrists rest
-    const top = stripTop + stripH + Math.max(14, H * 0.03), bottom = H - Math.max(20, H * 0.05);
-    // pick a range that keeps white keys wide enough for small fingers
-    const auto = (W - padX * 2) / 15 >= 52 ? 2 : 1;
-    const octaves = settings.range || auto;
-    const nWhite = octaves * 7 + 1; // end on the top C
-    const ww = (W - padX * 2) / nWhite, kh = bottom - top;
     keys = [];
     for (let i = 0; i < nWhite; i++) {
       const deg = i % 7, oct = (i / 7) | 0, midi = 60 + oct * 12 + WHITE_STEPS[deg];
-      keys.push({ white: true, midi, deg, x: padX + i * ww, y: top, w: ww, h: kh, color: NOTE_COLORS[deg], name: NOTE_NAMES[deg] });
+      keys.push({ white: true, midi, deg, x: left + i * ww, y: top, w: ww, h: kh, color: NOTE_COLORS[deg], name: NOTE_NAMES[deg] });
     }
     for (let i = 0; i < nWhite - 1; i++) {
       const deg = i % 7; if (!HAS_BLACK[deg]) continue;
       const bw = ww * 0.6, midi = keys[i].midi + 1;
-      keys.push({ white: false, midi, deg, x: padX + (i + 1) * ww - bw / 2, y: top, w: bw, h: kh * 0.6, color: NOTE_COLORS[deg] });
+      keys.push({ white: false, midi, deg, x: left + (i + 1) * ww - bw / 2, y: top, w: bw, h: kh * 0.6, color: NOTE_COLORS[deg] });
     }
   }
   function resize() {
@@ -220,6 +243,30 @@
     cv.width = W * dpr; cv.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     releaseAll(); layout();
+  }
+
+  // ---------- Follow-the-lights songs (all within one octave from middle C) ----------
+  const SONGS = {
+    twinkle: [60,60,67,67,69,69,67, 65,65,64,64,62,62,60, 67,67,65,65,64,64,62, 67,67,65,65,64,64,62, 60,60,67,67,69,69,67, 65,65,64,64,62,62,60],
+    mary:    [64,62,60,62,64,64,64, 62,62,62, 64,67,67, 64,62,60,62,64,64,64,64, 62,62,64,62,60],
+    buns:    [64,62,60, 64,62,60, 60,60,60,60, 62,62,62,62, 64,62,60],
+    row:     [60,60,60,62,64, 64,62,64,65,67, 72,72,72,67,67,67,64,64,64,60,60,60, 67,65,64,62,60],
+  };
+  let songPos = 0, songDone = 0;
+  const songTarget = () => (settings.song && !songDone ? SONGS[settings.song][songPos] : null);
+  function songStep(midi) {
+    if (midi !== songTarget()) return; // wrong keys just play, nothing to fail
+    if (++songPos >= SONGS[settings.song].length) {
+      songDone = 1; celebrate();
+      setTimeout(() => { songPos = 0; songDone = 0; }, 2500);
+    }
+  }
+  const confetti = [];
+  const BRIGHT = ['#ff3b3b', '#ff9a1f', '#f5c800', '#22b84a', '#2f7bff', '#a04dff', '#ff4fb0'];
+  function celebrate() {
+    if (settings.sound && audio()) [0, 4, 7, 12].forEach((n, i) => setTimeout(() => { const v = startVoice('bells', midiFreq(72 + n)); setTimeout(() => v.stop(), 300); }, 300 + i * 120));
+    for (let k = 0; k < 120; k++) confetti.push({ x: Math.random() * W, y: -20 - Math.random() * H * 0.5, vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 160,
+      rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10, w: 8 + Math.random() * 8, h: 5 + Math.random() * 5, color: BRIGHT[k % BRIGHT.length], t: 0 });
   }
 
   // ---------- Playing ----------
@@ -238,6 +285,7 @@
   }
   function pressKey(k) {
     held.set(k.midi, (held.get(k.midi) || 0) + 1);
+    songStep(k.midi);
     notes.push({ x: k.x + k.w / 2, y: k.y - 6, vx: (Math.random() - 0.5) * 40, t: 0, color: k.color,
       glyph: ['♪', '♫', '♩', '♬'][(Math.random() * 4) | 0], size: Math.max(22, unit() * 0.06) });
     if (!settings.sound || !audio()) return null;
@@ -294,13 +342,19 @@
   }
   function drawButton(b) {
     const on = !b.pad && settings.voice === b.id;
-    const s = 1 + Math.sin(b.bounce * Math.PI) * 0.15 + (b.pad ? beatPulse * 0.06 : 0);
+    const s = (on ? 1.08 : 1) + Math.sin(b.bounce * Math.PI) * 0.15 + (b.pad ? beatPulse * 0.06 : 0);
     ctx.save(); ctx.translate(b.x, b.y); ctx.scale(s, s);
-    ctx.fillStyle = on ? '#fff' : 'rgba(255,255,255,.45)';
-    ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2); ctx.fill();
-    if (on) { ctx.lineWidth = Math.max(4, b.r * 0.1); ctx.strokeStyle = '#ff6fb1'; ctx.stroke(); }
-    ctx.globalAlpha = on || b.pad ? 1 : 0.7;
+    // sound switches are circles; drum and clap are square pads you hit
+    ctx.beginPath();
+    if (b.pad) { const q = b.r * 0.92, c = q * 0.35; ctx.moveTo(-q + c, -q); ctx.arcTo(q, -q, q, q, c); ctx.arcTo(q, q, -q, q, c); ctx.arcTo(-q, q, -q, -q, c); ctx.arcTo(-q, -q, q, -q, c); ctx.closePath(); }
+    else ctx.arc(0, 0, b.r, 0, Math.PI * 2);
+    ctx.fillStyle = b.pad ? 'rgba(255,240,214,.95)' : on ? '#fff' : 'rgba(255,255,255,.75)';
+    ctx.shadowColor = 'rgba(43,45,92,.2)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    if (on) { ctx.lineWidth = Math.max(5, b.r * 0.12); ctx.strokeStyle = '#ff6fb1'; ctx.stroke(); }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#000'; // color emoji take on the fill's transparency, so keep it solid
     ctx.font = `${b.r * 1.1}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
     ctx.fillText(b.icon, 0, b.r * 0.06);
     ctx.restore();
@@ -311,6 +365,10 @@
     if (k.white) {
       ctx.fillStyle = down ? k.color : '#fffdf8';
       roundRect(k.x + 2, k.y + dy, k.w - 4, k.h - dy, r); ctx.fill();
+      // the next key of the song glows in its own color
+      if (!down && songTarget() === k.midi) {
+        ctx.globalAlpha = 0.3 + 0.25 * Math.sin(performance.now() / 160); ctx.fillStyle = k.color; ctx.fill(); ctx.globalAlpha = 1;
+      }
       ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(43,45,92,.25)'; ctx.stroke();
       // the label sits near the bottom where a finger doesn't cover it
       const cx = k.x + k.w / 2, cy = k.y + k.h - Math.min(k.w * 0.5, k.h * 0.12);
@@ -341,12 +399,25 @@
       const n = notes[i]; n.t += dt; n.y -= unit() * 0.15 * dt; n.x += (n.vx + Math.sin(n.t * 6) * 30) * dt;
       if (n.t > 1.1) notes.splice(i, 1);
     }
+    for (let i = confetti.length - 1; i >= 0; i--) {
+      const c = confetti[i]; c.t += dt; c.x += (c.vx + Math.sin(c.t * 3 + c.rot) * 40) * dt; c.y += c.vy * dt; c.rot += c.vr * dt;
+      if (c.y > H + 30) confetti.splice(i, 1);
+    }
   }
   function draw() {
     ctx.clearRect(0, 0, W, H);
     for (const b of buttons) drawButton(b);
     for (const k of keys) if (k.white) drawKey(k);
     for (const k of keys) if (!k.white) drawKey(k);
+    // a bouncing star above the next song key
+    const tk = keys.find(k => k.midi === songTarget());
+    if (tk) {
+      // drawn inside the key, below the black keys and above its label, so it never hits the buttons
+      const s = Math.max(26, Math.min(52, tk.w * 0.75));
+      ctx.font = `${s}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000';
+      ctx.fillText('⭐', tk.x + tk.w / 2, tk.y + tk.h * 0.72 - Math.abs(Math.sin(performance.now() / 220)) * s * 0.3);
+    }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const n of notes) {
       ctx.globalAlpha = Math.max(0, 1 - n.t / 1.1);
@@ -355,6 +426,10 @@
       ctx.strokeText(n.glyph, n.x, n.y); ctx.fillStyle = n.color; ctx.fillText(n.glyph, n.x, n.y);
     }
     ctx.globalAlpha = 1;
+    for (const c of confetti) {
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot); ctx.fillStyle = c.color;
+      ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h); ctx.restore();
+    }
   }
   function loop(t) {
     const dt = Math.min(0.05, (t - last) / 1000); last = t;
@@ -373,11 +448,13 @@
   function syncPanel() {
     document.querySelectorAll('[data-beat]').forEach(b => b.classList.toggle('on', +b.dataset.beat === settings.beat));
     document.querySelectorAll('[data-labels]').forEach(b => b.classList.toggle('on', b.dataset.labels === settings.labels));
-    const range = settings.range || ((W - Math.max(12, W * 0.03) * 2) / 15 >= 52 ? 2 : 1);
+    document.querySelectorAll('[data-song]').forEach(b => b.classList.toggle('on', b.dataset.song === settings.song));
+    const range = settings.range || autoRange();
     document.querySelectorAll('[data-range]').forEach(b => b.classList.toggle('on', +b.dataset.range === range));
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
   }
   document.querySelectorAll('[data-beat]').forEach(b => b.onclick = () => { settings.beat = +b.dataset.beat; saveSettings(); syncPanel(); audio(); });
+  document.querySelectorAll('[data-song]').forEach(b => b.onclick = () => { settings.song = b.dataset.song; songPos = 0; songDone = 0; saveSettings(); syncPanel(); });
   document.querySelectorAll('[data-labels]').forEach(b => b.onclick = () => { settings.labels = b.dataset.labels; saveSettings(); syncPanel(); });
   document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { settings.range = +b.dataset.range; saveSettings(); layout(); syncPanel(); });
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };

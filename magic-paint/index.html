@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Magic Paint!</title>
@@ -19,11 +19,19 @@
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
 
   /* Parent button: small, faded, needs a long press so little fingers don't open it */
-  #parentBtn { position: fixed; top: 10px; right: 10px; width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 3; touch-action: none; }
+  #parentBtn { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 3; touch-action: none; }
   #parentBtn .ring { position: absolute; inset: -4px; border-radius: 50%; border: 4px solid #ff6fb1; clip-path: inset(0 0 100% 0); }
   #parentBtn.holding .ring { animation: fill 1.5s linear forwards; }
   @keyframes fill { to { clip-path: inset(0 0 0 0); } }
 
+  /* Kid color buttons along the top, away from the bottom edge where wrists rest */
+  #palette { position: fixed; top: calc(10px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left)); display: flex; gap: 8px; z-index: 2; }
+  #palette.hidden { display: none; }
+  /* a row across the top when wide, a column down the left when tall, so buttons stay finger-sized */
+  #palette button { --s: min(64px, calc((100vw - 130px) / 7)); width: var(--s); height: var(--s); border-radius: 50%; border: 4px solid #fff; padding: 0; box-shadow: 0 3px 10px rgba(43,45,92,.25); transition: transform .15s; touch-action: none; }
+  #palette button.on { transform: scale(1.18); box-shadow: 0 0 0 4px #2b2d5c, 0 3px 10px rgba(43,45,92,.25); }
+  @media (orientation: portrait) { #palette { flex-direction: column; } #palette button { --s: min(64px, calc((100vh - 140px) / 7)); } }
+  #palette button[data-color="rainbow"] { background: conic-gradient(#ff3b3b, #ff9a1f, #f5c800, #22b84a, #2f7bff, #a04dff, #ff3b3b); }
   #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; overflow-y: auto; padding: 16px 0; }
   #panel.open { display: flex; }
   .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); margin: auto; }
@@ -41,6 +49,16 @@
 <body>
 <canvas id="c"></canvas>
 
+<div id="palette" aria-label="Paint colors">
+  <button data-color="rainbow" aria-label="Rainbow"></button>
+  <button data-color="#ff3b3b" style="background:#ff3b3b" aria-label="Red"></button>
+  <button data-color="#ff9a1f" style="background:#ff9a1f" aria-label="Orange"></button>
+  <button data-color="#f5c800" style="background:#f5c800" aria-label="Yellow"></button>
+  <button data-color="#22b84a" style="background:#22b84a" aria-label="Green"></button>
+  <button data-color="#2f7bff" style="background:#2f7bff" aria-label="Blue"></button>
+  <button data-color="#a04dff" style="background:#a04dff" aria-label="Purple"></button>
+</div>
+
 <button id="parentBtn" aria-label="Grown-up settings (press and hold)">⚙️<span class="ring"></span></button>
 
 <div id="panel">
@@ -50,7 +68,18 @@
     <div class="label">Paint colors</div>
     <div class="modes">
       <button data-brush="rainbow">🌈 Rainbow</button>
-      <button data-brush="crayons">🖍️ Crayon box</button>
+      <button data-brush="crayons">🖍️ Surprise colors</button>
+    </div>
+    <div class="label">Color buttons for kids</div>
+    <div class="modes">
+      <button data-palette="show">🎨 Show</button>
+      <button data-palette="hide">🙈 Hide</button>
+    </div>
+    <div class="label">Brush size</div>
+    <div class="modes" style="grid-template-columns: repeat(3, 1fr)">
+      <button data-size="0.6">Thin</button>
+      <button data-size="1">Medium</button>
+      <button data-size="1.7">Fat</button>
     </div>
     <div class="label">Stamps</div>
     <div class="modes">
@@ -91,7 +120,8 @@
 
   // ---------- Settings (only settings are saved) ----------
   const KEY = 'magicPaint.kids.v1';
-  let settings = { brush: 'rainbow', stamps: 'mix', paper: 'day', sound: true };
+  // brush is 'rainbow', 'crayons' (a surprise color each stroke) or a color the kid picked
+  let settings = { brush: 'rainbow', stamps: 'mix', paper: 'day', sound: true, palette: 'show', size: '1' };
   try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
   const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
   const applyPaper = () => document.body.classList.toggle('night', settings.paper === 'night');
@@ -160,13 +190,13 @@
   let hue = (Math.random() * 360) | 0;
   const strokes = new Map(); // pointerId -> stroke in progress
   const sparks = [], stamps = [];
-  const brushWidth = () => Math.max(10, unit() * 0.035);
+  const brushWidth = () => Math.max(10, unit() * 0.035) * +settings.size;
   const night = () => settings.paper === 'night';
 
   // rainbow moves with distance painted, so it looks the same on fast and slow screens
   function strokeColor(s, dist) {
     if (settings.brush === 'rainbow') { hue = (hue + dist * 360 / (unit() * 1.5)) % 360; return `hsl(${hue},95%,${night() ? 65 : 55}%)`; }
-    return s.color;
+    return settings.brush === 'crayons' ? s.color : settings.brush;
   }
 
   function paintSegment(s, x, y) {
@@ -200,15 +230,16 @@
   function drawStamp(g, s, scale) {
     g.save(); g.translate(s.x, s.y); g.rotate(s.rot);
     g.font = `${s.size * scale}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
-    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#000'; // keep emoji fully opaque
     g.fillText(s.glyph, 0, s.size * 0.06);
     g.restore();
   }
 
   // ---------- Input: drag paints, a quick tap stamps; every finger counts ----------
   const TAP_MOVE = 12, TAP_MS = 300;
+  let blank = true, idle = 0; // a blank page shows a hint finger after a moment
   cv.addEventListener('pointerdown', e => {
-    e.preventDefault(); audio();
+    e.preventDefault(); audio(); blank = false; idle = 0;
     strokes.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now(), painting: false, travel: 0, color: pick(BRIGHT) });
   });
   cv.addEventListener('pointermove', e => {
@@ -237,7 +268,19 @@
 
   // ---------- Loop ----------
   let last = performance.now();
+  // a ghost finger sparkles a loop on an empty page, showing that touching makes magic
+  let hintT = 0;
+  function hintPos(t) {
+    const cx = W / 2, cy = H * 0.55, a = unit() * 0.28;
+    return { x: cx + Math.sin(t) * a, y: cy + Math.sin(t * 2) * a * 0.45 };
+  }
   function update(dt) {
+    idle += dt;
+    if (blank && idle > 2) {
+      hintT += dt * 1.6;
+      const h = hintPos(hintT);
+      if (Math.random() < 0.6) sparks.push({ x: h.x, y: h.y, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 40, t: 0, life: 0.9, r: 3 + Math.random() * 4, color: `hsl(${(hintT * 60) % 360},95%,60%)` });
+    }
     for (let i = sparks.length - 1; i >= 0; i--) {
       const p = sparks[i]; p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.92; p.vy *= 0.92;
       if (p.t > p.life) sparks.splice(i, 1);
@@ -266,6 +309,14 @@
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r * k, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
+    if (blank && idle > 2) {
+      const h = hintPos(hintT);
+      ctx.globalAlpha = Math.min(1, (idle - 2) * 2) * 0.85;
+      ctx.font = `${Math.max(44, unit() * 0.1)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#000';
+      ctx.fillText('👆', h.x, h.y);
+      ctx.globalAlpha = 1;
+    }
   }
   function loop(t) {
     const dt = Math.min(0.05, (t - last) / 1000); last = t;
@@ -282,16 +333,29 @@
 
   function openPanel() { endHold(); syncPanel(); panel.classList.add('open'); }
   function syncPanel() {
-    for (const k of ['brush', 'stamps', 'paper'])
-      document.querySelectorAll(`[data-${k}]`).forEach(b => b.classList.toggle('on', b.dataset[k] === settings[k]));
+    for (const k of ['brush', 'stamps', 'paper', 'palette', 'size'])
+      document.querySelectorAll(`#panel [data-${k}]`).forEach(b => b.classList.toggle('on', b.dataset[k] === settings[k]));
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
   }
-  for (const k of ['brush', 'stamps', 'paper'])
-    document.querySelectorAll(`[data-${k}]`).forEach(b => b.onclick = () => { settings[k] = b.dataset[k]; saveSettings(); applyPaper(); syncPanel(); });
+  for (const k of ['brush', 'stamps', 'paper', 'palette', 'size'])
+    document.querySelectorAll(`#panel [data-${k}]`).forEach(b => b.onclick = () => { settings[k] = b.dataset[k]; saveSettings(); applyPaper(); syncPanel(); syncPalette(); });
+
+  // ---------- Kid color buttons ----------
+  const palette = document.getElementById('palette');
+  function syncPalette() {
+    palette.classList.toggle('hidden', settings.palette === 'hide');
+    palette.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.color === settings.brush));
+  }
+  palette.querySelectorAll('button').forEach((b, i) => b.addEventListener('pointerdown', e => {
+    e.preventDefault(); audio();
+    settings.brush = b.dataset.color; saveSettings(); syncPalette();
+    if (settings.sound && actx) tone(NOTES[i], actx.currentTime, 0.35, 'triangle', 0.12);
+  }));
+  syncPalette();
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
   document.getElementById('tClear').onclick = () => {
     pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.clearRect(0, 0, paint.width, paint.height); pctx.restore();
-    stamps.length = 0; whooshSound();
+    stamps.length = 0; whooshSound(); blank = true; idle = 0;
   };
   document.getElementById('tSave').onclick = () => {
     // flatten onto the paper color so the saved picture looks like the screen
@@ -299,9 +363,15 @@
     const o = out.getContext('2d');
     o.fillStyle = night() ? '#14163a' : '#fff6e9'; o.fillRect(0, 0, out.width, out.height);
     o.drawImage(paint, 0, 0);
-    const a = document.createElement('a');
-    a.download = `magic-paint-${new Date().toISOString().slice(0, 10)}.png`;
-    a.href = out.toDataURL('image/png'); a.click();
+    const name = `magic-paint-${new Date().toISOString().slice(0, 10)}.png`;
+    out.toBlob(blob => {
+      // the share sheet is the way to save to Photos on iPad and iPhone; elsewhere, download it
+      const file = new File([blob], name, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: 'Magic Paint picture' }).catch(() => {}); return; }
+      const a = document.createElement('a');
+      a.download = name; a.href = URL.createObjectURL(blob); a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }, 'image/png');
   };
   document.getElementById('tFull').onclick = () => {
     const el = document.documentElement;
