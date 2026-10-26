@@ -11,6 +11,8 @@ Simple, touch-friendly web games for little kids. Each game is a self-contained 
 
 All games share the same rules: tap and swipe only, nothing to fail, and settings behind a 1.5s press-and-hold on ⚙️ so little fingers don't open them. Each one is laid out for phones (portrait and landscape), iPads and monitors, and keeps clear of the iPhone notch and home bar when installed to the home screen.
 
+Working on this repo? Conventions, testing and deploy steps are in [CLAUDE.md](CLAUDE.md), and the backlog and history are in [ROADMAP.md](ROADMAP.md).
+
 ## Running locally
 
 ```bash
