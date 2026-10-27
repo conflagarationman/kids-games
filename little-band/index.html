@@ -502,7 +502,7 @@
   // ---------- Grown-up panel (press & hold 1.5s) ----------
   const pb = document.getElementById('parentBtn'), panel = document.getElementById('panel');
   let holdTimer = null;
-  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); holdTimer = setTimeout(openPanel, 1500); };
+  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); clearTimeout(holdTimer); holdTimer = setTimeout(openPanel, 1500); };
   const endHold = () => { pb.classList.remove('holding'); clearTimeout(holdTimer); };
   pb.addEventListener('pointerdown', startHold);
   pb.addEventListener('pointerup', endHold); pb.addEventListener('pointerleave', endHold); pb.addEventListener('pointercancel', endHold);
