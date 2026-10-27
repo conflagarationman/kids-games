@@ -46,7 +46,7 @@
 <div id="panel">
   <div class="card">
     <h2>Grown-up settings</h2>
-    <p>A real keyboard: hold a key to keep the note ringing, slide along to run up and down. Tap 🎹 🔔 🎸 🎺 to change the sound. With a song on, a star shows the next key; wrong keys just play. Press and hold the ⚙️ to get back here.</p>
+    <p>A real keyboard: hold a key to keep the note ringing, slide along to run up and down. Tap 🎹 🔔 🎸 🎺 to change the sound. ● records up to 20 seconds of playing and ▶ plays it back. With a song on, a star shows the next key; wrong keys just play. Press and hold the ⚙️ to get back here.</p>
     <div class="label">Play-along beat</div>
     <div class="modes">
       <button data-beat="0">🤫 No beat</button>
@@ -213,17 +213,17 @@
     const top = bottom - kh;
 
     // instrument buttons fill the space above: one row when wide, two rows of three when tall
-    const order = ['drum', 'piano', 'bells', 'guitar', 'horn', 'clap'];
+    const order = ['rec', 'play', 'drum', 'piano', 'bells', 'guitar', 'horn', 'clap'];
     const rows = portrait ? 2 : 1, cols = order.length / rows;
     const areaH = top - Math.max(14, H * 0.03) - stripTop;
     const cw = (right - left - (portrait ? 0 : 60)) / cols, rh = Math.min(areaH / rows, portrait ? 150 : Infinity);
     const r = Math.min(rh / 2, cw / 2) * 0.82;
     const y0 = stripTop + (areaH - rh * rows) / 2;
     const oldBtn = buttons;
-    // portrait: drum and clap stacked on the left, the four sounds in a square beside them
-    const slot = portrait ? ['drum', 'piano', 'bells', 'clap', 'guitar', 'horn'] : order;
+    // portrait: drum and clap stacked on the left, the four sounds in the middle, record and play on the right
+    const slot = portrait ? ['drum', 'piano', 'bells', 'rec', 'clap', 'guitar', 'horn', 'play'] : order;
     buttons = slot.map((id, i) => ({ id, x: left + cw * (i % cols + 0.5), y: y0 + rh * (((i / cols) | 0) + 0.5), r,
-      icon: id === 'drum' ? '🥁' : id === 'clap' ? '👏' : VOICES[id].icon, pad: !VOICES[id],
+      icon: id === 'drum' ? '🥁' : id === 'clap' ? '👏' : VOICES[id] ? VOICES[id].icon : '', pad: id === 'drum' || id === 'clap', ctrl: id === 'rec' || id === 'play',
       bounce: (oldBtn.find(b => b.id === id) || {}).bounce || 0 }));
 
     keys = [];
@@ -296,13 +296,54 @@
     const n = (held.get(f.key.midi) || 1) - 1;
     n ? held.set(f.key.midi, n) : held.delete(f.key.midi);
     if (f.voice) f.voice.stop();
+    if (f.ev && rec) f.ev.dur = Math.max(0.08, clock() - rec.t0 - f.ev.t);
   }
   function releaseAll() { for (const f of fingers.values()) releaseKey(f); fingers.clear(); held.clear(); }
+
+  // ---------- Record & play back ----------
+  // A take is a list of { t, kind: 'key' | 'pad', midi, voice, dur, id } in seconds from the start.
+  const MAX_REC = 20, clock = () => performance.now() / 1000;
+  let rec = null, take = null, playing = null;
+  const ghost = new Map(); // keys lit by playback
+  function recEvent(ev) { if (!rec) return null; ev.t = clock() - rec.t0; rec.events.push(ev); return ev; }
+  function beep(f) { if (settings.sound && audio()) { const v = startVoice('bells', f); setTimeout(() => v.stop(), 120); } }
+  function startRec() { stopPlay(); rec = { t0: clock(), events: [] }; beep(midiFreq(72)); }
+  function stopRec() {
+    if (!rec) return;
+    if (rec.events.length) take = rec.events;
+    rec = null; beep(midiFreq(67));
+  }
+  function startPlay() {
+    if (!take || !audio()) return;
+    stopRec();
+    playing = { timers: [], voices: new Set() };
+    const P = playing, end = Math.max(...take.map(e => e.t + (e.dur || 0.2)));
+    for (const ev of take) P.timers.push(setTimeout(() => {
+      if (ev.kind === 'pad') { if (settings.sound) PADS[ev.id](actx.currentTime); const b = buttons.find(b => b.id === ev.id); if (b) b.bounce = 1; return; }
+      const k = keys.find(k => k.midi === ev.midi);
+      ghost.set(ev.midi, (ghost.get(ev.midi) || 0) + 1);
+      if (k) notes.push({ x: k.x + k.w / 2, y: k.y - 6, vx: (Math.random() - 0.5) * 40, t: 0, color: k.color, glyph: '♪', size: Math.max(22, unit() * 0.06) });
+      const v = settings.sound ? startVoice(ev.voice, midiFreq(ev.midi)) : null;
+      if (v) P.voices.add(v);
+      P.timers.push(setTimeout(() => {
+        if (v) { v.stop(); P.voices.delete(v); }
+        const n = (ghost.get(ev.midi) || 1) - 1; n ? ghost.set(ev.midi, n) : ghost.delete(ev.midi);
+      }, ev.dur * 1000));
+    }, ev.t * 1000));
+    P.timers.push(setTimeout(() => { if (playing === P) playing = null; }, (end + 0.3) * 1000));
+  }
+  function stopPlay() {
+    if (!playing) return;
+    playing.timers.forEach(clearTimeout); playing.voices.forEach(v => v.stop());
+    playing = null; ghost.clear();
+  }
 
   function tapButton(b) {
     b.bounce = 1;
     if (!audio()) return;
-    if (b.pad) { if (settings.sound) PADS[b.id](actx.currentTime); return; }
+    if (b.id === 'rec') { rec ? stopRec() : startRec(); return; }
+    if (b.id === 'play') { playing ? stopPlay() : startPlay(); return; }
+    if (b.pad) { if (settings.sound) PADS[b.id](actx.currentTime); recEvent({ kind: 'pad', id: b.id }); return; }
     settings.voice = b.id; saveSettings();
     // a quick hello in the new sound
     if (settings.sound) { const v = startVoice(b.id, midiFreq(67)); setTimeout(() => v.stop(), 250); }
@@ -313,7 +354,7 @@
     const b = buttonAt(e.clientX, e.clientY);
     if (b) { tapButton(b); fingers.set(e.pointerId, { button: b }); return; }
     const k = keyAt(e.clientX, e.clientY);
-    fingers.set(e.pointerId, k ? { key: k, voice: pressKey(k) } : {});
+    fingers.set(e.pointerId, k ? { key: k, voice: pressKey(k), ev: recEvent({ kind: 'key', midi: k.midi, voice: settings.voice, dur: 0.4 }) } : {});
   });
   cv.addEventListener('pointermove', e => {
     const f = fingers.get(e.pointerId);
@@ -322,7 +363,7 @@
     const k = keyAt(e.clientX, e.clientY);
     if (k === (f.key || null)) return;
     releaseKey(f);
-    fingers.set(e.pointerId, k ? { key: k, voice: pressKey(k) } : {});
+    fingers.set(e.pointerId, k ? { key: k, voice: pressKey(k), ev: recEvent({ kind: 'key', midi: k.midi, voice: settings.voice, dur: 0.4 }) } : {});
   });
   const lift = e => { releaseKey(fingers.get(e.pointerId)); fingers.delete(e.pointerId); };
   addEventListener('pointerup', lift); addEventListener('pointercancel', lift);
@@ -340,7 +381,28 @@
     ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
     ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.closePath();
   }
+  function drawControl(b) {
+    const isRec = b.id === 'rec', active = isRec ? !!rec : !!playing, ready = isRec || !!take;
+    const pulse = active ? 1 + Math.sin(performance.now() / 160) * 0.06 : 1;
+    const s = pulse + Math.sin(b.bounce * Math.PI) * 0.15;
+    ctx.save(); ctx.translate(b.x, b.y); ctx.scale(s, s); ctx.globalAlpha = ready ? 1 : 0.4;
+    ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2);
+    ctx.fillStyle = active ? (isRec ? '#ffe3e3' : '#e0fbe8') : 'rgba(255,255,255,.75)';
+    ctx.shadowColor = 'rgba(43,45,92,.2)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3; ctx.fill(); ctx.shadowColor = 'transparent';
+    const col = isRec ? '#ff3b3b' : '#22b84a';
+    if (rec && isRec) {
+      // how much of the 20 seconds is used
+      ctx.lineWidth = Math.max(5, b.r * 0.12); ctx.strokeStyle = col; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(0, 0, b.r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, (clock() - rec.t0) / MAX_REC)); ctx.stroke();
+    }
+    ctx.fillStyle = col;
+    if (isRec) { ctx.beginPath(); ctx.arc(0, 0, b.r * 0.38, 0, Math.PI * 2); ctx.fill(); }
+    else if (playing) { const q = b.r * 0.3; ctx.fillRect(-q, -q, q * 2, q * 2); }
+    else { const q = b.r * 0.4; ctx.beginPath(); ctx.moveTo(-q * 0.7, -q); ctx.lineTo(q * 1.1, 0); ctx.lineTo(-q * 0.7, q); ctx.closePath(); ctx.fill(); }
+    ctx.restore();
+  }
   function drawButton(b) {
+    if (b.ctrl) return drawControl(b);
     const on = !b.pad && settings.voice === b.id;
     const s = (on ? 1.08 : 1) + Math.sin(b.bounce * Math.PI) * 0.15 + (b.pad ? beatPulse * 0.06 : 0);
     ctx.save(); ctx.translate(b.x, b.y); ctx.scale(s, s);
@@ -360,7 +422,7 @@
     ctx.restore();
   }
   function drawKey(k) {
-    const down = held.has(k.midi), r = Math.min(12, k.w * 0.18);
+    const down = held.has(k.midi) || ghost.has(k.midi), r = Math.min(12, k.w * 0.18);
     const dy = down ? 4 : 0;
     if (k.white) {
       ctx.fillStyle = down ? k.color : '#fffdf8';
@@ -391,6 +453,7 @@
 
   let last = performance.now();
   function update(dt) {
+    if (rec && clock() - rec.t0 > MAX_REC) stopRec();
     for (const b of buttons) b.bounce = Math.max(0, b.bounce - dt * 3);
     // pulse the drum and clap pads on the beat as the audio clock reaches it
     if (actx) while (beatTimes.length && beatTimes[0] <= actx.currentTime) { beatTimes.shift(); beatPulse = 1; }

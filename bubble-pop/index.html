@@ -55,6 +55,11 @@
       <button data-mode="shapes">⭐ Shapes</button>
       <button data-mode="mix">🌈 Mix it up</button>
     </div>
+    <div class="label">Game</div>
+    <div class="modes">
+      <button data-find="0">🫧 Free popping</button>
+      <button data-find="1">🔎 Find it!</button>
+    </div>
     <div class="label">Sound</div>
     <div class="toggles">
       <button id="tSound">🔊 Sounds</button>
@@ -104,17 +109,17 @@
   function makeItem(mode) {
     if (mode === 'mix') mode = pick(['animals', 'animals', 'colors', 'letters', 'numbers', 'shapes']);
     switch (mode) {
-      case 'animals': { const [e, n, s] = deal(ANIMALS); return { kind: 'emoji', glyph: e, say: `${n}! ${s}` }; }
-      case 'colors':  { const [n, c] = deal(COLORS); return { kind: 'color', color: c, say: n + '!' }; }
-      case 'letters': { const l = deal(LETTERS); return { kind: 'text', glyph: l, color: pick(BRIGHT), say: `${l}! ${l} is for ${LETTER_WORDS[l]}` }; }
-      case 'numbers': { const n = 1 + ((Math.random() * 10) | 0); return { kind: 'text', glyph: String(n), color: pick(BRIGHT), say: n + '!', count: n }; }
-      case 'shapes':  { const s = deal(SHAPES); return { kind: 'shape', shape: s, color: pick(BRIGHT), say: s + '!' }; }
+      case 'animals': { const [e, n, s] = deal(ANIMALS); return { kind: 'emoji', glyph: e, say: `${n}! ${s}`, id: 'a' + n, ask: `the ${n.toLowerCase()}` }; }
+      case 'colors':  { const [n, c] = deal(COLORS); return { kind: 'color', color: c, say: n + '!', id: 'c' + n, ask: `the ${n.toLowerCase()} one` }; }
+      case 'letters': { const l = deal(LETTERS); return { kind: 'text', glyph: l, color: pick(BRIGHT), say: `${l}! ${l} is for ${LETTER_WORDS[l]}`, id: 'l' + l, ask: `the letter ${l}` }; }
+      case 'numbers': { const n = 1 + ((Math.random() * 10) | 0); return { kind: 'text', glyph: String(n), color: pick(BRIGHT), say: n + '!', count: n, id: 'n' + n, ask: `number ${n}` }; }
+      case 'shapes':  { const s = deal(SHAPES); return { kind: 'shape', shape: s, color: pick(BRIGHT), say: s + '!', id: 's' + s, ask: `the ${s.toLowerCase()}` }; }
     }
   }
 
   // ---------- Settings (only settings are saved) ----------
   const KEY = 'bubblePop.kids.v1';
-  let settings = { mode: 'animals', sound: true, voice: true, speed: 0.6 };
+  let settings = { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false };
   try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
   const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
 
@@ -217,7 +222,7 @@
     bubbles.push({
       x: x ?? openX(r),
       y: y ?? (H + r),
-      r, giant, item: makeItem(settings.mode),
+      r, giant, item: newItem(),
       vx: opts.vx || 0,
       vy: opts.vy ?? -(H * (RISE[0] + Math.random() * (RISE[1] - RISE[0]))) * (giant ? 0.7 : 1),
       phase: Math.random() * Math.PI * 2,
@@ -226,11 +231,47 @@
     });
   }
 
+  // ---------- Find it: "Pop the red one!" ----------
+  // Off by default (it has a right answer). A wrong pop still pops and says its name: nothing to fail.
+  let target = null, found = 0, wrongRun = 0, askedAt = 0, hintGlow = 0;
+  const copyOf = t => ({ ...t, color: t.kind === 'color' ? t.color : pick(BRIGHT) });
+  function newItem() {
+    return settings.find && target && Math.random() < 0.3 ? copyOf(target) : makeItem(settings.mode);
+  }
+  function ask() { if (target) { say(`Pop ${target.ask}!`); askedAt = performance.now(); } }
+  function newTarget() {
+    if (!settings.find) { target = null; return; }
+    let t; do { t = makeItem(settings.mode); } while (target && t.id === target.id && settings.mode !== 'numbers');
+    target = t; wrongRun = 0; hintGlow = 0;
+    // make sure a couple are already on screen, in easy reach
+    const mid = bubbles.filter(b => b.y > H * 0.3 && b.y < H * 0.85 && !b.giant).sort(() => Math.random() - 0.5);
+    for (const b of mid.slice(0, 2)) b.item = copyOf(target);
+    ask();
+  }
+  function foundIt(b) {
+    found++; wrongRun = 0; hintGlow = 0;
+    say(`Yes! ${b.item.say}`);
+    cheerSound();
+    for (let k = 0; k < (found % 5 === 0 ? 140 : 50); k++) {
+      confetti.push({ x: b.x + (Math.random() - 0.5) * W * 0.4, y: b.y - Math.random() * H * 0.3,
+        vx: (Math.random() - 0.5) * 120, vy: 60 + Math.random() * 160, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10,
+        w: 8 + Math.random() * 8, h: 5 + Math.random() * 5, color: pick(BRIGHT), t: 0 });
+    }
+    const was = target; target = null;
+    setTimeout(() => { if (settings.find && !target) { target = was; newTarget(); } }, 1600);
+  }
+
   function popBubble(i) {
     const b = bubbles.splice(i, 1)[0];
     popCount++;
     popSound();
-    say(b.item.say);
+    const isTarget = settings.find && target && b.item.id === target.id;
+    if (isTarget) foundIt(b);
+    else {
+      say(b.item.say);
+      // after a few misses, ask again and make the right ones shimmer
+      if (settings.find && target && ++wrongRun >= 3) { wrongRun = 0; hintGlow = 1; setTimeout(ask, 900); }
+    }
     const n = 18;
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2;
@@ -246,7 +287,7 @@
         spawnBubble(b.x, b.y, { giant: false, r: baseR() * 0.7, vx: Math.cos(a) * sp, vy: -H * RISE[1] * 1.2 });
       }
     }
-    if (popCount % 12 === 0) celebrate();
+    if (!settings.find && popCount % 12 === 0) celebrate();
     // keep the screen lively: a fresh bubble arrives soon after each pop
     setTimeout(() => { if (bubbles.length < maxBubbles()) spawnBubble(); }, 400);
   }
@@ -287,7 +328,12 @@
       if (bubbles.length < maxBubbles() + 2) spawnBubble(x, H + unit() * 0.15);
     }
   }
-  cv.addEventListener('pointerdown', e => { e.preventDefault(); audio(); down.add(e.pointerId); touch(e.clientX, e.clientY, true); });
+  let spoke = false; // iOS only lets the page talk after a touch, so the first question is asked again then
+  cv.addEventListener('pointerdown', e => {
+    e.preventDefault(); audio(); down.add(e.pointerId);
+    if (!spoke) { spoke = true; if (settings.find && target) { setTimeout(ask, 700); } }
+    touch(e.clientX, e.clientY, true);
+  });
   cv.addEventListener('pointermove', e => { if (down.has(e.pointerId)) touch(e.clientX, e.clientY, false); });
   const lift = e => down.delete(e.pointerId);
   addEventListener('pointerup', lift); addEventListener('pointercancel', lift);
@@ -332,9 +378,28 @@
     ctx.restore();
   }
 
+  // soft clouds drifting behind the bubbles, so the sky has some depth
+  const CLOUDS = Array.from({ length: 5 }, (_, i) => ({ y: 0.08 + i * 0.17 + Math.random() * 0.06, s: 0.7 + Math.random() * 0.6, x: Math.random(), v: 0.006 + Math.random() * 0.008 }));
+  function drawClouds(now) {
+    ctx.fillStyle = 'rgba(255,255,255,.45)';
+    for (const c of CLOUDS) {
+      const s = unit() * 0.13 * c.s, span = W + s * 5;
+      const x = ((c.x + now / 1000 * c.v) % 1) * span - s * 2.5, y = c.y * H;
+      ctx.beginPath();
+      ctx.arc(x, y, s, 0, 7); ctx.arc(x + s * 1.1, y - s * 0.45, s * 1.25, 0, 7); ctx.arc(x + s * 2.3, y, s * 0.95, 0, 7);
+      ctx.rect(x, y, s * 2.3, s * 0.9); ctx.fill();
+    }
+  }
+
   function drawBubble(b, now) {
     const grow = Math.min(1, (now - b.born) / 300);
     const r = b.r * (0.5 + 0.5 * grow) * (1 + Math.sin(b.phase * 1.6) * 0.035);
+    if (hintGlow && target && b.item.id === target.id) {
+      // a gentle golden shimmer on the ones we're looking for
+      const k = 0.5 + 0.5 * Math.sin(now / 180);
+      ctx.beginPath(); ctx.arc(b.x, b.y, r * (1.12 + k * 0.08), 0, Math.PI * 2);
+      ctx.lineWidth = 6; ctx.strokeStyle = `rgba(255,210,63,${0.5 + k * 0.5})`; ctx.stroke();
+    }
     const tint = b.item.kind === 'color' ? b.item.color : null;
     const g = ctx.createRadialGradient(b.x - r * 0.35, b.y - r * 0.35, r * 0.1, b.x, b.y, r);
     if (tint) {
@@ -356,6 +421,8 @@
   let last = performance.now(), spawnT = 0;
   function update(dt) {
     const sp = settings.speed;
+    // nobody's found it for a while: ask again and shimmer the right ones
+    if (settings.find && target && performance.now() - askedAt > 12000) { hintGlow = 1; ask(); }
     spawnT -= dt;
     // the timer keeps a steady stream; the cap is only a ceiling for when lots of taps add extras
     if (spawnT <= 0 && bubbles.length < maxBubbles() + 4) {
@@ -391,6 +458,7 @@
   function draw() {
     const now = performance.now();
     ctx.clearRect(0, 0, W, H);
+    drawClouds(now);
     for (const b of bubbles) drawBubble(b, now);
     for (const p of particles) {
       const k = 1 - p.t / p.life;
@@ -426,6 +494,25 @@
       ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot); ctx.fillStyle = c.color;
       ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h); ctx.restore();
     }
+    if (settings.find && target) drawTargetBadge(now);
+  }
+
+  // top-center card showing what to find, so it works with the voice off too
+  function drawTargetBadge(now) {
+    const s = Math.max(40, Math.min(64, unit() * 0.13)), w = s * 2.3, h = s * 1.35;
+    const x = W / 2, y = 10 + h / 2 + (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sat')) || 0);
+    const bob = 1 + Math.sin(now / 300) * 0.03;
+    ctx.save(); ctx.translate(x, y); ctx.scale(bob, bob);
+    ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.shadowColor = 'rgba(43,45,92,.25)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-w / 2, -h / 2, w, h, h / 2) : ctx.rect(-w / 2, -h / 2, w, h); ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.fillStyle = '#000'; ctx.font = `${s * 0.6}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🔎', -w / 2 + s * 0.6, s * 0.04);
+    if (target.kind === 'color') {
+      ctx.beginPath(); ctx.arc(s * 0.35, 0, s * 0.42, 0, Math.PI * 2); ctx.fillStyle = target.color; ctx.fill();
+      ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(43,45,92,.3)'; ctx.stroke();
+    } else drawItem(target, s * 0.35, 0, s * 0.62, 1);
+    ctx.restore();
   }
 
   function loop(t) {
@@ -444,6 +531,7 @@
   function openPanel() { endHold(); syncPanel(); panel.classList.add('open'); }
   function syncPanel() {
     document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === settings.mode));
+    document.querySelectorAll('[data-find]').forEach(b => b.classList.toggle('on', +b.dataset.find === +settings.find));
     document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('on', +b.dataset.speed === settings.speed));
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
     document.getElementById('tVoice').classList.toggle('off', !settings.voice);
@@ -451,9 +539,11 @@
   document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
     settings.mode = b.dataset.mode; saveSettings(); syncPanel();
     for (const bb of bubbles) bb.item = makeItem(settings.mode); // switch what's on screen right away
+    target = null; newTarget();
   });
   document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { settings.speed = +b.dataset.speed; saveSettings(); syncPanel(); });
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
+  document.querySelectorAll('[data-find]').forEach(b => b.onclick = () => { settings.find = b.dataset.find === '1'; saveSettings(); syncPanel(); target = null; newTarget(); });
   document.getElementById('tVoice').onclick = () => { settings.voice = !settings.voice; saveSettings(); syncPanel(); };
   document.getElementById('tFull').onclick = () => {
     const el = document.documentElement;
@@ -464,7 +554,11 @@
 
   // start with the sky already full
   for (let i = 0, n = maxBubbles(); i < n; i++) spawnBubble(undefined, H * (0.1 + 0.9 * (i + Math.random()) / n), { giant: false });
+  newTarget();
   requestAnimationFrame(loop);
+  // ?debug: a read-only snapshot for automated testing
+  if (/[?&]debug/.test(location.search)) window.__bubblePop = () => ({ target: target && target.id, found, bubbles: bubbles.length,
+    targets: bubbles.filter(b => target && b.item.id === target.id).map(b => ({ x: b.x, y: b.y })) });
 
   // Offline support (only works over HTTPS or localhost)
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});

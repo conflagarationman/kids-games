@@ -15,14 +15,13 @@ Sessions can only test in a desktop preview browser with simulated touches and n
 
 Roughly in priority order. None are committed to. Check with the owner before starting one.
 
-1. **Web Hero v2: sticky-web yank.** A second shot type where the web sticks to a crate or vehicle and yanks it over. This is the most "web-slinger" part of the original idea.
-2. **Web Hero v2: rescue mini-levels.** Web a falling kitten or ice cream before it lands, for variety between tower levels.
-3. **Web Hero: choice of hero,** a few original color and suit variants.
-4. **Bubble Pop "find it" mode** for ages 3–4. "Pop the red one!" is spoken; the right bubble cheers, a wrong one gently shows the right answer. Off by default, since it has right and wrong answers.
-5. **Magic Paint coloring pages:** simple outlines (an animal, a house) to paint inside, as an option beside the blank page.
-6. **Little Band recording:** a big ● button that records about 10 seconds of playing and plays it back.
-7. **Shared grown-up settings:** sound on or off and an optional play-time limit, set once on the home page and read by every game.
-8. **Where's the Cow?** A listening and vocabulary game for ages 3–4: animals shown, "Can you find the cow?" asked. Ranked lower because it overlaps Bubble Pop and has right and wrong answers.
+1. **Web Hero: rescue mini-levels.** Web a falling kitten or ice cream before it lands, for variety between tower levels.
+2. **Web Hero: choice of hero,** a few original color and suit variants.
+3. **Web Hero: fuller Big levels on portrait iPads.** The narrow screen only fits about 2 vehicles; stack more vertically when tall.
+4. **Shared grown-up settings:** sound on or off and an optional play-time limit, set once on the home page and read by every game.
+5. **Magic Paint: more pictures** (dinosaur, truck, rocket) and a few with more detail for older kids.
+6. **Little Band: keep the last recording** in `localStorage` so it survives a reload.
+7. **Where's the Cow?** A listening and vocabulary game for ages 3–4: animals shown, "Can you find the cow?" asked. Partly covered now by Bubble Pop's Find it mode.
 
 ## Research notes (why the games are built the way they are)
 
@@ -48,4 +47,10 @@ Roughly in priority order. None are committed to. Check with the owner before st
   - **Little Band:** a portrait layout and follow-the-lights songs.
   - **All games:** safe-area insets and the emoji transparency fix.
 - **Illustrated covers:** an SVG cover for every game and a redesigned home page.
+- **Second review pass:** the owner asked to make every game "the best you possibly can". Added:
+  - **Web Hero:** sticky-web yank (tap a piece), a bigger world on tall screens, vehicles-left row, web trails, dust and screen shake.
+  - **Bubble Pop:** Find it mode and drifting clouds.
+  - **Magic Paint:** coloring pages with tap-to-fill.
+  - **Little Band:** record and play.
+  - **Testing:** `?debug` hooks added for testing.
 - **Web Hero:** the owner wanted a slingshot game in the style of Spider-Man web shooters and Angry Birds for their 4-year-old, with trucks and cars as targets. It was made with an original masked-kid hero, for trademark reasons. Built from a written plan by a separate Sonnet session; v1 is knock-down only.

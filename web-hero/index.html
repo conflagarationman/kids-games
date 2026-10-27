@@ -46,12 +46,17 @@
 <div id="panel">
   <div class="card">
     <h2>Grown-up settings</h2>
-    <p>Pull back anywhere to aim, like a slingshot, and let go to shoot a web ball. Or just tap a spot to the right of the hero and the hero will throw a web ball right there. Knock over every truck and car to clear the level. Press and hold the ⚙️ to get back here.</p>
+    <p>Pull back anywhere to aim, like a slingshot, and let go to shoot a web ball. Or tap a truck or crate and a sticky web zips out and yanks it off (or throws a ball there, if you pick that below). Tap empty sky to throw a web ball right there. Knock over every truck and car to clear the level. Press and hold the ⚙️ to get back here.</p>
     <div class="label">Level size</div>
     <div class="modes">
       <button data-diff="easy">🙂 Easy</button>
       <button data-diff="medium">😎 Medium</button>
       <button data-diff="big">🤩 Big</button>
+    </div>
+    <div class="label">Tapping a truck or crate</div>
+    <div class="modes" style="grid-template-columns: repeat(2, 1fr)">
+      <button data-tap="yank">🕸️ Web yanks it</button>
+      <button data-tap="throw">⚪ Throw a ball</button>
     </div>
     <div class="label">Options</div>
     <div class="toggles">
@@ -67,12 +72,12 @@
 <script src="matter.min.js"></script>
 <script>
 (() => {
-  const { Engine, Bodies, Body, Composite, Events, Sleeping } = Matter;
+  const { Engine, Bodies, Body, Composite, Events, Sleeping, Constraint, Query } = Matter;
   const DEBUG = /[?&]debug/.test(location.search);
 
   // ---------- Settings (only settings are saved) ----------
   const KEY = 'webHero.kids.v1';
-  let settings = { diff: 'easy', dots: true, sound: true };
+  let settings = { diff: 'easy', dots: true, sound: true, tap: 'yank' };
   try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
   const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
 
@@ -131,6 +136,13 @@
     env(g, t, 0.32 * vol, 0.004, 0.18); o.connect(g).connect(master); o.start(t); o.stop(t + 0.22);
     noise(t, 0.08, 0.18 * vol, 'lowpass', 900);
   }
+  function zip() {
+    if (!snd()) return; const t = actx.currentTime;
+    noise(t, 0.22, 0.22, 'bandpass', 3000, 600);
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'triangle'; o.frequency.setValueAtTime(900, t); o.frequency.exponentialRampToValueAtTime(260, t + 0.25);
+    env(g, t, 0.12, 0.01, 0.28); o.connect(g).connect(master); o.start(t); o.stop(t + 0.3);
+  }
   function ding(n) { if (snd()) tone(midiFreq(72 + [0, 2, 4, 7, 9, 12][n % 6]), actx.currentTime + 0.25, 0.4, 'triangle', 0.12); }
   function cheerSound() {
     if (!snd()) return; const t = actx.currentTime;
@@ -149,7 +161,8 @@
 
   function layout() {
     const sab = inset('--sab'), sal = inset('--sal');
-    u = Math.min(W, H * 1.5) / 14;
+    // wide screens size by height; tall screens would leave a tiny world under a huge sky, so they size by width
+    u = Math.max(Math.min(W, H * 1.5) / 14, Math.min(W / 10, H / 16));
     G = u * 13;            // floaty gravity (px/s^2)
     VMAX = u * 16;         // launch speed at full pull (px/s)
     CAP = u * 3.5;         // pull distance for full power
@@ -218,7 +231,8 @@
     { e: '🚌', w: 2.6, r: 0.76 }, { e: '🚒', w: 2.6, r: 0.76 }, { e: '🚚', w: 2.5, r: 0.72 }, { e: '🚛', w: 2.6, r: 0.72 }, { e: '🚜', w: 2.2, r: 0.8 },
   ];
   const veh = e => VEHICLES.find(v => v.e === e);
-  let engine, dyn = [], vehicles = [], balls = [], live = false;
+  let engine, dyn = [], vehicles = [], balls = [], yanks = [], trails = [], live = false;
+  let shake = 0;
   let level = 1, stars = 0, starBump = 0, clearTimer = 0, shotFired = false;
   const particles = [], confetti = [];
 
@@ -226,7 +240,7 @@
     engine = Engine.create({ enableSleeping: true });
     engine.gravity.y = G / 1000;
     engine.positionIterations = 8;
-    dyn = []; vehicles = []; balls = [];
+    dyn = []; vehicles = []; balls = []; yanks = []; trails = [];
     const gnd = Bodies.rectangle(W / 2, groundY + 150, W * 6, 300, { isStatic: true, friction: 0.8, label: 'ground' });
     const ledge = Bodies.rectangle(heroX, ledgeTop + ledgeH / 2 + 100, u * 3.2, ledgeH + 200, { isStatic: true, friction: 0.8 });
     Composite.add(engine.world, [gnd, ledge]);
@@ -366,6 +380,10 @@
         if (x.plugin.vehicle) { x.plugin.squash = Math.min(0.22, rel / (u * 60)); x.plugin.sqT = 0; }
         if (now - (x.plugin.thudAt || 0) > 200) { x.plugin.thudAt = now; thud(Math.min(1, rel / (u * 12))); }
       }
+      // a puff of dust where they met, and a little shake for a big crash
+      const sp = p.collision && p.collision.supports && p.collision.supports[0];
+      if (sp) dust(sp.x, sp.y, Math.min(1, rel / (u * 10)));
+      if (rel > u * 9) shake = Math.max(shake, Math.min(1, rel / (u * 18)));
     }
   }
   function checkKnocked() {
@@ -389,6 +407,9 @@
   function burst(x, y) {
     for (let k = 0; k < 12; k++) { const a = Math.random() * 6.283, s = rnd(u * 2, u * 6); particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - u * 2, t: 0, r: rnd(u * 0.18, u * 0.34), rot: Math.random() * 6, color: pick(['#ffd23f', '#fff3a8', '#ff9a1f', '#ffffff']) }); }
   }
+  function dust(x, y, k) {
+    for (let i = 0; i < 3 + k * 4; i++) { const a = Math.random() * 6.283, s = rnd(u * 0.4, u * 1.6) * (0.5 + k); particles.push({ dust: true, x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - u * 0.6, t: 0, r: rnd(u * 0.15, u * 0.35) * (0.6 + k), color: 'rgba(240,232,220,.9)' }); }
+  }
   function celebrate() {
     cheerSound(); heroJump();
     for (let k = 0; k < 120; k++) confetti.push({ x: Math.random() * W, y: -20 - Math.random() * H * 0.5, vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 160,
@@ -408,7 +429,20 @@
     Composite.add(engine.world, b);
     balls.push({ body: b, t: 0 });
     armHold = { ang: Math.atan2(vy, vx), t: 0.35 };
+    trails.push({ body: b, ang: Math.atan2(vy, vx), t: 0 });
     thwip();
+  }
+  // sticky web: zips straight to the tapped piece and reels it in toward the hero
+  function yank(body, px, py) {
+    audio(); shotFired = true; lastAct = performance.now();
+    Sleeping.set(body, false);
+    const ang = Math.atan2(py - shoulder.y, px - shoulder.x), w = wrist(ang);
+    const len = Math.hypot(px - w.x, py - w.y);
+    const c = Constraint.create({ pointA: { x: w.x, y: w.y }, bodyB: body, pointB: { x: px - body.position.x, y: py - body.position.y }, length: len, stiffness: 0.012, damping: 0.05 });
+    Composite.add(engine.world, c);
+    yanks.push({ c, body, t: 0, len, ang, reach: 0 });
+    armHold = { ang, t: 0.6 };
+    zip();
   }
   function launchFrom(lx, ly) {
     const len = Math.hypot(lx, ly) || 1, speed = VMAX * Math.min(len, CAP) / CAP;
@@ -501,7 +535,11 @@
     if (e.type === 'pointercancel') return;
     const lx = a.x0 - a.x, ly = a.y0 - a.y;
     if (Math.hypot(lx, ly) >= 12) { const v = launchFrom(lx, ly); fire(v.vx, v.vy); }
-    else if (a.x0 > heroX + u * 1.2) { const v = solveThrow(a.x0, a.y0); fire(v.vx, v.vy); }
+    else if (a.x0 > heroX + u * 1.2) {
+      const hit = settings.tap === 'yank' && live ? Query.point(dyn, { x: a.x0, y: a.y0 })[0] : null;
+      if (hit && yanks.length < 2) yank(hit, a.x0, a.y0);
+      else { const v = solveThrow(a.x0, a.y0); fire(v.vx, v.vy); }
+    }
     else heroJump();
   };
   addEventListener('pointerup', endAim); addEventListener('pointercancel', endAim);
@@ -555,6 +593,12 @@
     for (const k of [0.38, 0.7]) { ctx.beginPath(); for (let i = 0; i <= 8; i++) { const a = i * Math.PI / 4, m = k * r * (i % 2 ? 0.88 : 1); ctx.lineTo(Math.cos(a) * m, Math.sin(a) * m); } ctx.stroke(); }
     ctx.lineWidth = Math.max(2, r * 0.09); ctx.beginPath(); ctx.arc(0, 0, r - ctx.lineWidth / 2, 0, 7); ctx.stroke();
   }
+  function webLine(x1, y1, x2, y2, lw, a) {
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = 'rgba(43,45,92,.3)'; ctx.lineWidth = lw + 3; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
   function aimInfo() {
     if (!aim) return null;
     const lx = aim.x0 - aim.x, ly = aim.y0 - aim.y, d = Math.hypot(lx, ly);
@@ -562,6 +606,8 @@
   }
   function draw(dt) {
     ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * u * 0.25 * shake, (Math.random() - 0.5) * u * 0.25 * shake);
     ctx.drawImage(bgc, 0, 0, W, H);
     const ai = aimInfo(), pulling = ai && ai.active;
     drawHero(pulling ? ai.ang : null);
@@ -575,6 +621,22 @@
       if (DEBUG) { ctx.strokeStyle = 'red'; ctx.beginPath(); b.vertices.forEach((v, i) => i ? ctx.lineTo(v.x, v.y) : ctx.moveTo(v.x, v.y)); ctx.closePath(); ctx.stroke(); }
     }
     for (const bl of balls) { ctx.save(); ctx.translate(bl.body.position.x, bl.body.position.y); ctx.rotate(bl.body.angle); drawBall(bl.body); ctx.restore(); }
+
+    // web strands: a quick trail behind each shot, and the sticky web while it yanks
+    ctx.lineCap = 'round';
+    for (const tr of trails) {
+      const w = wrist(tr.ang), p = tr.body.position, a = 1 - tr.t / 0.3;
+      webLine(w.x, w.y, p.x, p.y, Math.max(2, u * 0.08) * a, a);
+    }
+    for (const y of yanks) {
+      const w = wrist(y.ang), c = y.c, b = y.body;
+      // Matter turns pointB with the body, so this stays on the spot that was tapped
+      const tx = b.position.x + c.pointB.x, ty = b.position.y + c.pointB.y;
+      const ex = w.x + (tx - w.x) * y.reach, ey = w.y + (ty - w.y) * y.reach;
+      c.pointA.x = w.x; c.pointA.y = w.y;
+      webLine(w.x, w.y, ex, ey, Math.max(3, u * 0.12), 1);
+      if (y.reach >= 1) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(tx, ty, u * 0.22, 0, 7); ctx.fill(); ctx.strokeStyle = '#8fa3c7'; ctx.lineWidth = 2; ctx.stroke(); }
+    }
 
     // pull feedback: stretchy web strand + aim dots
     if (pulling) {
@@ -611,12 +673,34 @@
     }
 
     // star bursts
-    for (const p of particles) { ctx.save(); ctx.globalAlpha = Math.max(0, 1 - p.t / 0.9); ctx.translate(p.x, p.y); ctx.rotate(p.rot + p.t * 4); star(0, 0, p.r, p.r * 0.45, p.color, '#e0a800', 1.5); ctx.restore(); }
+    for (const p of particles) {
+      ctx.save(); ctx.translate(p.x, p.y);
+      if (p.dust) { ctx.globalAlpha = Math.max(0, 1 - p.t / 0.6) * 0.8; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(0, 0, p.r, 0, 7); ctx.fill(); }
+      else { ctx.globalAlpha = Math.max(0, 1 - p.t / 0.9); ctx.rotate(p.rot + p.t * 4); star(0, 0, p.r, p.r * 0.45, p.color, '#e0a800', 1.5); }
+      ctx.restore();
+    }
     ctx.globalAlpha = 1;
     for (const c of confetti) { ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot); ctx.fillStyle = c.color; ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h); ctx.restore(); }
 
-    // star counter (top-left, clear of the safe area)
+    ctx.restore(); // end of the shaken world; the counters below stay still
+
+    // what's left: one little icon per vehicle in this level, under the star counter, ticked off as they fall
     const bh = Math.min(74, Math.max(46, u * 1.2)), bx = 12 + inset('--sal'), by = 10 + inset('--sat'), sz = bh * 0.72;
+    const vs = Math.min(40, Math.max(24, u * 0.7));
+    if (vehicles.length) {
+      const s = vs, gap = s * 0.25;
+      let x = bx + s / 2 + 4; const y = by + bh + 8 + s / 2;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (const v of vehicles) {
+        ctx.globalAlpha = v.plugin.knocked ? 0.35 : 1; ctx.fillStyle = '#000';
+        ctx.font = `${s}px ${EMOJI}`; ctx.fillText(v.plugin.e, x, y);
+        if (v.plugin.knocked) { ctx.globalAlpha = 1; ctx.font = `${s * 0.6}px ${EMOJI}`; ctx.fillText('⭐', x + s * 0.3, y - s * 0.3); }
+        x += s + gap;
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // star counter (top-left, clear of the safe area)
     const label = String(stars);
     ctx.font = `900 ${bh * 0.62}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
     const bw = bh * 0.35 + sz + ctx.measureText(label).width + bh * 0.4;
@@ -629,7 +713,7 @@
     ctx.fillText(label, -bw / 2 + bh * 0.35 + sz + bh * 0.05, bh * 0.03);
     ctx.restore();
     ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(43,45,92,.55)'; ctx.font = `800 ${Math.max(13, bh * 0.3)}px "Trebuchet MS",sans-serif`; ctx.textBaseline = 'top';
-    ctx.fillText('Level ' + level, bx + 6, by + bh + 4);
+    ctx.fillText('Level ' + level, bx + 6, by + bh + 14 + vs);
   }
 
   // ---------- Loop ----------
@@ -638,13 +722,26 @@
     heroT += dt; jumpT += dt; armHold.t -= dt; starBump = Math.max(0, starBump - dt * 3);
     acc += dt;
     while (engine && acc >= 1 / 60) { Engine.update(engine, 1000 / 60); acc -= 1 / 60; }
+    for (let i = yanks.length - 1; i >= 0; i--) {
+      const y = yanks[i]; y.t += dt; y.reach = Math.min(1, y.t / 0.12);
+      // the web shoots out first, then reels in hard, then lets go
+      if (y.t > 0.12) { y.c.length = Math.max(y.len * 0.25, y.c.length - u * 22 * dt); y.c.stiffness = 0.02; }
+      else y.c.stiffness = 0;
+      if (y.t > 0.75) { Composite.remove(engine.world, y.c); yanks.splice(i, 1); }
+    }
+    for (let i = trails.length - 1; i >= 0; i--) { trails[i].t += dt; if (trails[i].t > 0.3) trails.splice(i, 1); }
+    shake = Math.max(0, shake - dt * 4);
     for (let i = balls.length - 1; i >= 0; i--) {
       const b = balls[i]; b.t += dt; const p = b.body.position;
       if (b.t > 5 || p.x < -u * 3 || p.x > W + u * 3 || p.y > H + u * 3) { Composite.remove(engine.world, b.body); balls.splice(i, 1); }
     }
     if (live) checkKnocked();
     if (clearTimer > 0) { clearTimer -= dt; if (clearTimer <= 0) { clearTimer = 0; nextLevel(); } }
-    for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.t += dt; p.vy += u * 12 * dt; p.x += p.vx * dt; p.y += p.vy * dt; if (p.t > 0.9) particles.splice(i, 1); }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i]; p.t += dt;
+      if (p.dust) { p.vx *= 0.9; p.vy *= 0.9; p.r *= 1 + dt * 1.5; } else p.vy += u * 12 * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt; if (p.t > (p.dust ? 0.6 : 0.9)) particles.splice(i, 1);
+    }
     for (let i = confetti.length - 1; i >= 0; i--) {
       const c = confetti[i]; c.t += dt; c.x += (c.vx + Math.sin(c.t * 3 + c.rot) * 40) * dt; c.y += c.vy * dt; c.rot += c.vr * dt;
       if (c.y > H + 30) confetti.splice(i, 1);
@@ -666,10 +763,12 @@
   function openPanel() { endHold(); aim = null; syncPanel(); panel.classList.add('open'); }
   function syncPanel() {
     document.querySelectorAll('[data-diff]').forEach(b => b.classList.toggle('on', b.dataset.diff === settings.diff));
+    document.querySelectorAll('[data-tap]').forEach(b => b.classList.toggle('on', b.dataset.tap === settings.tap));
     document.getElementById('tDots').classList.toggle('off', !settings.dots);
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
   }
   document.querySelectorAll('[data-diff]').forEach(b => b.onclick = () => { settings.diff = b.dataset.diff; saveSettings(); syncPanel(); if (level > 3) buildLevel(); });
+  document.querySelectorAll('[data-tap]').forEach(b => b.onclick = () => { settings.tap = b.dataset.tap; saveSettings(); syncPanel(); });
   document.getElementById('tDots').onclick = () => { settings.dots = !settings.dots; saveSettings(); syncPanel(); };
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
   document.getElementById('tFull').onclick = () => {
@@ -682,6 +781,9 @@
 
   resize();
   requestAnimationFrame(loop);
+  // ?debug: outlines bodies and exposes a read-only snapshot for automated testing
+  if (DEBUG) window.__webHero = () => ({ level, stars, u, yanks: yanks.length, balls: balls.length,
+    vehicles: vehicles.map(b => ({ x: b.position.x, y: b.position.y, knocked: b.plugin.knocked })) });
 
   // Offline support (only works over HTTPS or localhost)
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
