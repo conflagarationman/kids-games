@@ -12,6 +12,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#8fd8ff">
 <style>
+  :root { --sat: env(safe-area-inset-top); }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   body { background: linear-gradient(180deg, #8fd8ff 0%, #c9b8ff 60%, #ffc6e5 100%); }
@@ -125,10 +126,11 @@
 
   // ---------- Canvas ----------
   const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-  let W = 0, H = 0;
+  let W = 0, H = 0, SAT = 0;
   function resize() {
     const dpr = Math.min(devicePixelRatio || 1, 2);
     W = innerWidth; H = innerHeight;
+    SAT = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sat')) || 0; // notch height, for the Find it badge
     cv.width = W * dpr; cv.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
@@ -172,7 +174,7 @@
   function cheerSound() {
     if (!settings.sound || !audio()) return;
     const t = actx.currentTime;
-    [0, 2, 4, 5, 7].forEach((n, i) => tone(NOTES[n % NOTES.length] * (n > 7 ? 2 : 1), t + i * 0.11, 0.5, 'triangle', 0.13));
+    [0, 2, 4, 5, 7].forEach((n, i) => tone(NOTES[n], t + i * 0.11, 0.5, 'triangle', 0.13));
   }
 
   // ---------- Voice ----------
@@ -231,6 +233,11 @@
     });
   }
 
+  function addConfetti(x, y, spreadX, minVy) {
+    confetti.push({ x, y, vx: (Math.random() - 0.5) * spreadX, vy: minVy + Math.random() * 160, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10,
+      w: 8 + Math.random() * 8, h: 5 + Math.random() * 5, color: pick(BRIGHT), t: 0 });
+  }
+
   // ---------- Find it: "Pop the red one!" ----------
   // Off by default (it has a right answer). A wrong pop still pops and says its name: nothing to fail.
   let target = null, found = 0, wrongRun = 0, askedAt = 0, hintGlow = 0;
@@ -253,9 +260,7 @@
     say(`Yes! ${b.item.say}`);
     cheerSound();
     for (let k = 0; k < (found % 5 === 0 ? 140 : 50); k++) {
-      confetti.push({ x: b.x + (Math.random() - 0.5) * W * 0.4, y: b.y - Math.random() * H * 0.3,
-        vx: (Math.random() - 0.5) * 120, vy: 60 + Math.random() * 160, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10,
-        w: 8 + Math.random() * 8, h: 5 + Math.random() * 5, color: pick(BRIGHT), t: 0 });
+      addConfetti(b.x + (Math.random() - 0.5) * W * 0.4, b.y - Math.random() * H * 0.3, 120, 60);
     }
     const was = target; target = null;
     setTimeout(() => { if (settings.find && !target) { target = was; newTarget(); } }, 1600);
@@ -297,13 +302,10 @@
       cheerSound();
       say(pick(['Hooray!', 'Yay! Great popping!', 'Wow! You did it!', 'Super popper!']));
       for (let k = 0; k < 120; k++) {
-        confetti.push({ x: Math.random() * W, y: -20 - Math.random() * H * 0.5,
-          vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 160, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10,
-          w: 8 + Math.random() * 8, h: 5 + Math.random() * 5, color: pick(BRIGHT), t: 0 });
+        addConfetti(Math.random() * W, -20 - Math.random() * H * 0.5, 60, 120);
       }
     }, 900);
   }
-
 
   // ---------- Input: every finger counts, swiping pops too ----------
   const down = new Set();
@@ -331,7 +333,7 @@
   let spoke = false; // iOS only lets the page talk after a touch, so the first question is asked again then
   cv.addEventListener('pointerdown', e => {
     e.preventDefault(); audio(); down.add(e.pointerId);
-    if (!spoke) { spoke = true; if (settings.find && target) { setTimeout(ask, 700); } }
+    if (!spoke) { spoke = true; if (settings.find && target) setTimeout(ask, 700); }
     touch(e.clientX, e.clientY, true);
   });
   cv.addEventListener('pointermove', e => { if (down.has(e.pointerId)) touch(e.clientX, e.clientY, false); });
@@ -500,7 +502,7 @@
   // top-center card showing what to find, so it works with the voice off too
   function drawTargetBadge(now) {
     const s = Math.max(40, Math.min(64, unit() * 0.13)), w = s * 2.3, h = s * 1.35;
-    const x = W / 2, y = 10 + h / 2 + (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sat')) || 0);
+    const x = W / 2, y = 10 + h / 2 + SAT;
     const bob = 1 + Math.sin(now / 300) * 0.03;
     ctx.save(); ctx.translate(x, y); ctx.scale(bob, bob);
     ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.shadowColor = 'rgba(43,45,92,.25)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
@@ -523,7 +525,7 @@
   // ---------- Grown-up panel (press & hold 1.5s) ----------
   const pb = document.getElementById('parentBtn'), panel = document.getElementById('panel');
   let holdTimer = null;
-  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); holdTimer = setTimeout(openPanel, 1500); };
+  const startHold = e => { e.preventDefault(); clearTimeout(holdTimer); pb.classList.add('holding'); holdTimer = setTimeout(openPanel, 1500); };
   const endHold = () => { pb.classList.remove('holding'); clearTimeout(holdTimer); };
   pb.addEventListener('pointerdown', startHold);
   pb.addEventListener('pointerup', endHold); pb.addEventListener('pointerleave', endHold); pb.addEventListener('pointercancel', endHold);
