@@ -54,7 +54,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Color emoji on canvas:** set `ctx.fillStyle = '#000'` right before any emoji `fillText`. Chrome applies the fill's transparency to color emoji, and this once made icons look washed out.
 - **Offline (`sw.js`):** stale-while-revalidate over a fixed `FILES` list.
   - **Prefix cleanup:** all games share one origin, so `activate` may delete only caches starting with that game's prefix (`k.startsWith('<game>-')`). Never delete other games' caches.
-  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v3`, `magic-paint-v3`, `little-band-v4`, `web-hero-v2`. Bumping gets installed copies to update.
+  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v4`, `magic-paint-v4`, `little-band-v5`, `web-hero-v3`. Bumping gets installed copies to update.
   - **New files:** add any file the game needs to `FILES`.
 - **Look:** soft pastel gradients and white-outlined shapes. Fonts are "Trebuchet MS" for UI and "Arial Rounded MT Bold" for big glyphs; ink is `#2b2d5c`; the bright palette is `#ff3b3b #ff9a1f #f5c800 #22b84a #2f7bff #a04dff #ff4fb0`.
 
