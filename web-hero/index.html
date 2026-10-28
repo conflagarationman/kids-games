@@ -117,12 +117,15 @@
     env(g, t, peak, 0.005, dur);
     s.connect(f).connect(g).connect(master); s.start(t); s.stop(t + dur + 0.05);
   }
+  function sweep(type, f0, f1, fdur, t, peak, attack, dur) {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + fdur);
+    env(g, t, peak, attack, dur); o.connect(g).connect(master); o.start(t); o.stop(t + dur + 0.05);
+  }
   function thwip() {
     if (!snd()) return; const t = actx.currentTime;
     noise(t, 0.18, 0.25, 'bandpass', 700, 3200);
-    const o = actx.createOscillator(), g = actx.createGain();
-    o.frequency.setValueAtTime(420, t); o.frequency.exponentialRampToValueAtTime(1500, t + 0.12);
-    env(g, t, 0.1, 0.01, 0.15); o.connect(g).connect(master); o.start(t); o.stop(t + 0.2);
+    sweep('sine', 420, 1500, 0.12, t, 0.1, 0.01, 0.15);
   }
   function honk(pitch, double) {
     if (!snd()) return; const t = actx.currentTime;
@@ -131,17 +134,13 @@
   }
   function thud(vol) {
     if (!snd()) return; const t = actx.currentTime;
-    const o = actx.createOscillator(), g = actx.createGain();
-    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.14);
-    env(g, t, 0.32 * vol, 0.004, 0.18); o.connect(g).connect(master); o.start(t); o.stop(t + 0.22);
+    sweep('sine', 150, 48, 0.14, t, 0.32 * vol, 0.004, 0.18);
     noise(t, 0.08, 0.18 * vol, 'lowpass', 900);
   }
   function zip() {
     if (!snd()) return; const t = actx.currentTime;
     noise(t, 0.22, 0.22, 'bandpass', 3000, 600);
-    const o = actx.createOscillator(), g = actx.createGain();
-    o.type = 'triangle'; o.frequency.setValueAtTime(900, t); o.frequency.exponentialRampToValueAtTime(260, t + 0.25);
-    env(g, t, 0.12, 0.01, 0.28); o.connect(g).connect(master); o.start(t); o.stop(t + 0.3);
+    sweep('triangle', 900, 260, 0.25, t, 0.12, 0.01, 0.28);
   }
   function ding(n) { if (snd()) tone(midiFreq(72 + [0, 2, 4, 7, 9, 12][n % 6]), actx.currentTime + 0.25, 0.4, 'triangle', 0.12); }
   function cheerSound() {
@@ -241,7 +240,7 @@
     engine.gravity.y = G / 1000;
     engine.positionIterations = 8;
     dyn = []; vehicles = []; balls = []; yanks = []; trails = [];
-    const gnd = Bodies.rectangle(W / 2, groundY + 150, W * 6, 300, { isStatic: true, friction: 0.8, label: 'ground' });
+    const gnd = Bodies.rectangle(W / 2, groundY + 150, W * 6, 300, { isStatic: true, friction: 0.8 });
     const ledge = Bodies.rectangle(heroX, ledgeTop + ledgeH / 2 + 100, u * 3.2, ledgeH + 200, { isStatic: true, friction: 0.8 });
     Composite.add(engine.world, [gnd, ledge]);
     Events.on(engine, 'collisionStart', onCollide);
@@ -265,7 +264,7 @@
     for (const g of groups) {
       let y = groundY;
       if (g.bridge) {
-        const br = g.bridge, off = u * (1.2 + 1.6 / 2 + 0.0);
+        const br = g.bridge, off = u * 2;
         for (let r = 0; r < br.rows; r++) for (const sx of [-1, 1]) addCrate(g.cx + sx * off, y - u * 0.8 - r * (u * 1.6 + GAP));
         y -= br.rows * (u * 1.6 + GAP);
         addGirder(g.cx, y - u * 0.2, u * 5.6); y -= u * 0.4 + GAP;
@@ -330,9 +329,7 @@
       groups.push({ cx: 0, layers });
     });
     if (bridge) {
-      let rows = ri(2, 3);
-      const vs = [pickV(2.4), pickV(2.4)];
-      const g = { cx: 0, bridge: { rows, vehs: vs } };
+      const g = { cx: 0, bridge: { rows: ri(2, 3), vehs: [pickV(2.4), pickV(2.4)] } };
       while (groupH(g) > availH && g.bridge.rows > 1) g.bridge.rows--;
       groups.push(g);
     }
@@ -340,8 +337,7 @@
     for (let i = groups.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [groups[i], groups[j]] = [groups[j], groups[i]]; }
     const total = groups.reduce((s, g) => s + groupW(g), 0), free = (xr - xl) - total;
     const gap = Math.max(u * 0.3, free / (groups.length + 1));
-    let x = xl + Math.max(0, free - gap * (groups.length - 1)) / 2 + (free < 0 ? 0 : 0);
-    x = Math.max(xl, xl + (free - gap * (groups.length - 1)) / 2);
+    let x = Math.max(xl, xl + (free - gap * (groups.length - 1)) / 2);
     for (const g of groups) { const w = groupW(g); g.cx = x + w / 2; x += w + gap; }
     return groups;
   }
@@ -421,15 +417,15 @@
   function fire(vx, vy) {
     audio(); shotFired = true; lastAct = performance.now();
     if (balls.length >= 3) { Composite.remove(engine.world, balls.shift().body); }
-    const w = wrist(Math.atan2(vy, vx));
+    const ang = Math.atan2(vy, vx), w = wrist(ang);
     const b = Bodies.circle(w.x, w.y, u * 0.4, { restitution: 0.3, friction: 0.4, frictionAir: 0, density: 0.016, collisionFilter: { group: -1 } });
     b.plugin.ball = true;
     Body.setVelocity(b, { x: vx / 60, y: vy / 60 });
     Body.setAngularVelocity(b, 0.15);
     Composite.add(engine.world, b);
     balls.push({ body: b, t: 0 });
-    armHold = { ang: Math.atan2(vy, vx), t: 0.35 };
-    trails.push({ body: b, ang: Math.atan2(vy, vx), t: 0 });
+    armHold = { ang, t: 0.35 };
+    trails.push({ body: b, ang, t: 0 });
     thwip();
   }
   // sticky web: zips straight to the tapped piece and reels it in toward the hero
@@ -524,7 +520,7 @@
   let aim = null, lastAct = 0;
   cv.addEventListener('pointerdown', e => {
     e.preventDefault(); audio(); lastAct = performance.now();
-    if (aim || clearTimer < 0) return;
+    if (aim) return;
     aim = { id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };
     try { cv.setPointerCapture(e.pointerId); } catch (err) {}
   });
@@ -585,13 +581,18 @@
     ctx.font = `${p.w * 1.0}px ${EMOJI}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(p.e, 0, p.h * 0.04);
   }
-  function drawBall(b) {
+  function drawBall() {
     const r = u * 0.4;
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
     ctx.strokeStyle = '#8fa3c7'; ctx.lineWidth = Math.max(1.5, r * 0.07);
     ctx.beginPath(); for (let i = 0; i < 8; i++) { ctx.moveTo(0, 0); ctx.lineTo(Math.cos(i * Math.PI / 4) * r, Math.sin(i * Math.PI / 4) * r); } ctx.stroke();
     for (const k of [0.38, 0.7]) { ctx.beginPath(); for (let i = 0; i <= 8; i++) { const a = i * Math.PI / 4, m = k * r * (i % 2 ? 0.88 : 1); ctx.lineTo(Math.cos(a) * m, Math.sin(a) * m); } ctx.stroke(); }
     ctx.lineWidth = Math.max(2, r * 0.09); ctx.beginPath(); ctx.arc(0, 0, r - ctx.lineWidth / 2, 0, 7); ctx.stroke();
+  }
+  function aimDots(pts, k) {
+    ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(43,45,92,.35)'; ctx.lineWidth = 2;
+    for (const p of pts) { ctx.globalAlpha = p.a * k; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(3, u * 0.12), 0, 7); ctx.fill(); ctx.stroke(); }
+    ctx.globalAlpha = 1;
   }
   function webLine(x1, y1, x2, y2, lw, a) {
     ctx.globalAlpha = a;
@@ -620,7 +621,7 @@
       ctx.restore();
       if (DEBUG) { ctx.strokeStyle = 'red'; ctx.beginPath(); b.vertices.forEach((v, i) => i ? ctx.lineTo(v.x, v.y) : ctx.moveTo(v.x, v.y)); ctx.closePath(); ctx.stroke(); }
     }
-    for (const bl of balls) { ctx.save(); ctx.translate(bl.body.position.x, bl.body.position.y); ctx.rotate(bl.body.angle); drawBall(bl.body); ctx.restore(); }
+    for (const bl of balls) { ctx.save(); ctx.translate(bl.body.position.x, bl.body.position.y); ctx.rotate(bl.body.angle); drawBall(); ctx.restore(); }
 
     // web strands: a quick trail behind each shot, and the sticky web while it yanks
     ctx.lineCap = 'round';
@@ -633,7 +634,6 @@
       // Matter turns pointB with the body, so this stays on the spot that was tapped
       const tx = b.position.x + c.pointB.x, ty = b.position.y + c.pointB.y;
       const ex = w.x + (tx - w.x) * y.reach, ey = w.y + (ty - w.y) * y.reach;
-      c.pointA.x = w.x; c.pointA.y = w.y;
       webLine(w.x, w.y, ex, ey, Math.max(3, u * 0.12), 1);
       if (y.reach >= 1) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(tx, ty, u * 0.22, 0, 7); ctx.fill(); ctx.strokeStyle = '#8fa3c7'; ctx.lineWidth = 2; ctx.stroke(); }
     }
@@ -643,18 +643,10 @@
       const w = wrist(ai.ang), k = Math.min(ai.d, CAP), sc = k / ai.d;
       const bx = w.x - ai.lx * sc * 0.9, by = w.y - ai.ly * sc * 0.9;
       const v = launchFrom(ai.lx, ai.ly);
-      if (settings.dots) {
-        ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(43,45,92,.35)'; ctx.lineWidth = 2;
-        for (const p of trajectory(w.x, w.y, v.vx, v.vy, 25)) { ctx.globalAlpha = p.a; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(3, u * 0.12), 0, 7); ctx.fill(); ctx.stroke(); }
-        ctx.globalAlpha = 1;
-      }
-      ctx.lineCap = 'round';
+      if (settings.dots) aimDots(trajectory(w.x, w.y, v.vx, v.vy, 25), 1);
       const lw = Math.max(3, u * 0.14 * (1 - 0.5 * k / CAP));
-      ctx.strokeStyle = 'rgba(43,45,92,.35)'; ctx.lineWidth = lw + 3; ctx.beginPath(); ctx.moveTo(w.x, w.y); ctx.lineTo(bx, by); ctx.stroke();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(w.x, w.y); ctx.lineTo(bx, by); ctx.stroke();
+      webLine(w.x, w.y, bx, by, lw, 1);
       ctx.save(); ctx.translate(bx, by); drawBall(); ctx.restore();
-    } else if (!aim || !ai.active) {
-      // a web ball ready in the other hand is not needed; keep the scene clean
     }
 
     // first-play hint
@@ -664,10 +656,7 @@
       const fa = t < 0.4 ? t / 0.4 : t > 2.5 ? Math.max(0, (3 - t) / 0.5) : 1;
       const sx = w.x + u * 0.5, sy = w.y + u * 0.3, lx = u * 2.8 * e, ly = u * 2.2 * e;
       const v = launchFrom(lx, -ly);
-      if (e > 0.15) {
-        ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(43,45,92,.35)'; ctx.lineWidth = 2;
-        trajectory(w.x, w.y, v.vx, v.vy, 25).forEach(q => { ctx.globalAlpha = q.a * fa * Math.min(1, e * 2); ctx.beginPath(); ctx.arc(q.x, q.y, Math.max(3, u * 0.12), 0, 7); ctx.fill(); ctx.stroke(); });
-      }
+      if (e > 0.15) aimDots(trajectory(w.x, w.y, v.vx, v.vy, 25), fa * Math.min(1, e * 2));
       ctx.globalAlpha = fa; ctx.fillStyle = '#000'; ctx.font = `${u * 1.5}px ${EMOJI}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('👆', sx - lx, sy + ly + u * 0.5); ctx.globalAlpha = 1;
     }
@@ -686,7 +675,7 @@
 
     // what's left: one little icon per vehicle in this level, under the star counter, ticked off as they fall
     const bh = Math.min(74, Math.max(46, u * 1.2)), bx = 12 + inset('--sal'), by = 10 + inset('--sat'), sz = bh * 0.72;
-    const vs = Math.min(40, Math.max(24, u * 0.7));
+    const vs = Math.min(40, Math.max(24, u * 0.7)), numFont = `900 ${bh * 0.62}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
     if (vehicles.length) {
       const s = vs, gap = s * 0.25;
       let x = bx + s / 2 + 4; const y = by + bh + 8 + s / 2;
@@ -702,14 +691,14 @@
 
     // star counter (top-left, clear of the safe area)
     const label = String(stars);
-    ctx.font = `900 ${bh * 0.62}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
+    ctx.font = numFont;
     const bw = bh * 0.35 + sz + ctx.measureText(label).width + bh * 0.4;
     ctx.save(); ctx.translate(bx + bw / 2, by + bh / 2); const sb = 1 + Math.sin(starBump * Math.PI) * 0.18; ctx.scale(sb, sb);
     ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.shadowColor = 'rgba(43,45,92,.2)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
     rr(ctx, -bw / 2, -bh / 2, bw, bh, bh / 2); ctx.fill(); ctx.shadowColor = 'transparent';
     ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
     ctx.fillStyle = '#000'; ctx.font = `${sz}px ${EMOJI}`; ctx.fillText('⭐', -bw / 2 + bh * 0.35 + sz / 2, bh * 0.03);
-    ctx.fillStyle = '#2b2d5c'; ctx.font = `900 ${bh * 0.62}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`; ctx.textAlign = 'left';
+    ctx.fillStyle = '#2b2d5c'; ctx.font = numFont; ctx.textAlign = 'left';
     ctx.fillText(label, -bw / 2 + bh * 0.35 + sz + bh * 0.05, bh * 0.03);
     ctx.restore();
     ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(43,45,92,.55)'; ctx.font = `800 ${Math.max(13, bh * 0.3)}px "Trebuchet MS",sans-serif`; ctx.textBaseline = 'top';
@@ -755,7 +744,7 @@
   // ---------- Grown-up panel (press & hold 1.5s) ----------
   const pb = document.getElementById('parentBtn'), panel = document.getElementById('panel');
   let holdTimer = null;
-  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); holdTimer = setTimeout(openPanel, 1500); };
+  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); clearTimeout(holdTimer); holdTimer = setTimeout(openPanel, 1500); };
   const endHold = () => { pb.classList.remove('holding'); clearTimeout(holdTimer); };
   pb.addEventListener('pointerdown', startHold);
   pb.addEventListener('pointerup', endHold); pb.addEventListener('pointerleave', endHold); pb.addEventListener('pointercancel', endHold);
