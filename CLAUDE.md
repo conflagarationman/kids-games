@@ -54,7 +54,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Color emoji on canvas:** set `ctx.fillStyle = '#000'` right before any emoji `fillText`. Chrome applies the fill's transparency to color emoji, and this once made icons look washed out.
 - **Offline (`sw.js`):** stale-while-revalidate over a fixed `FILES` list.
   - **Prefix cleanup:** all games share one origin, so `activate` may delete only caches starting with that game's prefix (`k.startsWith('<game>-')`). Never delete other games' caches.
-  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v4`, `magic-paint-v4`, `little-band-v5`, `web-hero-v3`. Bumping gets installed copies to update.
+  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v4`, `magic-paint-v5`, `little-band-v5`, `web-hero-v3`. Bumping gets installed copies to update.
   - **New files:** add any file the game needs to `FILES`.
 - **Look:** soft pastel gradients and white-outlined shapes. Fonts are "Trebuchet MS" for UI and "Arial Rounded MT Bold" for big glyphs; ink is `#2b2d5c`; the bright palette is `#ff3b3b #ff9a1f #f5c800 #22b84a #2f7bff #a04dff #ff4fb0`.
 
@@ -103,7 +103,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Hint:** a ghost 👆 hint shows on a blank page.
 - **Saving:** the share sheet when `navigator.canShare({files})`, otherwise a download. The saved picture includes the coloring-page lines.
 - **Coloring pages** (`settings.page`, `PAGES`): line art drawn in a -1..1 box with helpers `c e p l a` onto an `outline` canvas that sits on top of the paint. `wall` marks line pixels.
-- **Tap to fill:** a tap on a page flood-fills the open area (`fillAt`) into an offscreen canvas, which pours in with a growing clip circle, then bakes into the paint.
+- **Tap to fill:** a tap on a page flood-fills the open area (`fillAt`) into an offscreen canvas, which pours in with a growing clip circle, then bakes into the paint. A tap on a page never stamps: a tap on a line fills the nearest open spot (searched out past the line width, `lineW`), and if there is none it just sparkles.
 - **Page placement:** `pageBox()` keeps clear of the color buttons. On resize the page keeps its box so the paint still lines up, unless it no longer fits (then the page is re-placed and the paint cleared).
 - **Picture button:** the 🖼️ button in `#palette` cycles `PAGE_ORDER`.
 

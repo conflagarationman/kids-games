@@ -1,6 +1,6 @@
 // Offline support: cache everything, serve from cache, refresh in the background when online.
 // All the games share one site, so only clear out this game's own old caches.
-const CACHE = 'magic-paint-v4';
+const CACHE = 'magic-paint-v5';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

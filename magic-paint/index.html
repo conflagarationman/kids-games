@@ -307,7 +307,7 @@
   };
   const PAGE_ORDER = ['', ...Object.keys(PAGES)];
   const outline = document.createElement('canvas'), octx = outline.getContext('2d');
-  let page = null, wall = null; // page: { name, cx, cy, S }; wall: 1 where a line is
+  let page = null, wall = null, lineW = 0; // page: { name, cx, cy, S }; wall: 1 where a line is; lineW in device px
   const fills = [];
   function pageBox() {
     // keep clear of the kid color buttons: a column on the left when tall, a row on top when wide
@@ -321,7 +321,8 @@
     if (!page || !PAGES[page.name]) return;
     const g = octx, S = page.S;
     g.setTransform(dpr * S, 0, 0, dpr * S, dpr * page.cx, dpr * page.cy);
-    g.lineWidth = Math.max(5, S * 0.035) / S; g.lineCap = g.lineJoin = 'round';
+    lineW = Math.max(5, S * 0.035) * dpr;
+    g.lineWidth = lineW / dpr / S; g.lineCap = g.lineJoin = 'round';
     g.strokeStyle = night() ? '#ffffff' : '#2b2d5c';
     const shape = (build) => (...a) => { g.beginPath(); build(...a); g.stroke(); };
     PAGES[page.name]({
@@ -351,9 +352,9 @@
     let px = Math.round(x * dpr), py = Math.round(y * dpr);
     if (px < 0 || py < 0 || px >= w || py >= h) return false;
     if (wall[py * w + px]) {
-      // tapped right on a line: use the nearest open spot
+      // tapped right on a line: use the nearest open spot (lines are thick on big retina screens, so look past a full width)
       let ok = false;
-      for (let r = 2; r < 14 && !ok; r += 2) for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r]]) {
+      for (let r = 2; r < lineW + 6 && !ok; r += 2) for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r], [r, r], [-r, r], [r, -r], [-r, -r]]) {
         const qx = px + dx, qy = py + dy;
         if (qx >= 0 && qy >= 0 && qx < w && qy < h && !wall[qy * w + qx]) { px = qx; py = qy; ok = true; break; }
       }
@@ -415,7 +416,11 @@
     strokes.delete(e.pointerId);
     // a short touch that never moved is a stamp; a long still press is a dot of paint
     if (!s.painting && e.type === 'pointerup') {
-      if (performance.now() - s.t0 < TAP_MS) { if (!(page && fillAt(s.x0, s.y0, strokeColor(s, unit() * 0.2)))) addStamp(s.x0, s.y0); }
+      // on a coloring page a tap only ever fills: stickers are for the blank page
+      if (performance.now() - s.t0 < TAP_MS) {
+        if (!page) addStamp(s.x0, s.y0);
+        else if (!fillAt(s.x0, s.y0, strokeColor(s, unit() * 0.2))) burst(s.x0, s.y0, 10, unit() * 0.2);
+      }
       else { s.painting = true; paintSegment(s, s.x0 + 0.1, s.y0); }
     }
   };
