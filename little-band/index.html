@@ -263,8 +263,9 @@
   }
   const confetti = [];
   const BRIGHT = ['#ff3b3b', '#ff9a1f', '#f5c800', '#22b84a', '#2f7bff', '#a04dff', '#ff4fb0'];
+  function blip(name, midi, ms) { if (settings.sound && audio()) { const v = startVoice(name, midiFreq(midi)); setTimeout(() => v.stop(), ms); } }
   function celebrate() {
-    if (settings.sound && audio()) [0, 4, 7, 12].forEach((n, i) => setTimeout(() => { const v = startVoice('bells', midiFreq(72 + n)); setTimeout(() => v.stop(), 300); }, 300 + i * 120));
+    [0, 4, 7, 12].forEach((n, i) => setTimeout(() => blip('bells', 72 + n, 300), 300 + i * 120));
     for (let k = 0; k < 120; k++) confetti.push({ x: Math.random() * W, y: -20 - Math.random() * H * 0.5, vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 160,
       rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10, w: 8 + Math.random() * 8, h: 5 + Math.random() * 5, color: BRIGHT[k % BRIGHT.length], t: 0 });
   }
@@ -280,21 +281,21 @@
     for (const k of keys) if (k.white && x >= k.x && x < k.x + k.w && y >= k.y - 8 && y < k.y + k.h + 16) return k;
     return null;
   }
-  function buttonAt(x, y) {
-    return buttons.find(b => (b.x - x) ** 2 + (b.y - y) ** 2 <= (b.r + 10) ** 2) || null;
+  const buttonAt = (x, y) => buttons.find(b => (b.x - x) ** 2 + (b.y - y) ** 2 <= (b.r + 10) ** 2);
+  const bump = (m, midi, d) => { const n = (m.get(midi) || 0) + d; n > 0 ? m.set(midi, n) : m.delete(midi); };
+  function puff(k, glyph) {
+    notes.push({ x: k.x + k.w / 2, y: k.y - 6, vx: (Math.random() - 0.5) * 40, t: 0, color: k.color, glyph, size: Math.max(22, unit() * 0.06) });
   }
   function pressKey(k) {
-    held.set(k.midi, (held.get(k.midi) || 0) + 1);
+    bump(held, k.midi, 1);
     songStep(k.midi);
-    notes.push({ x: k.x + k.w / 2, y: k.y - 6, vx: (Math.random() - 0.5) * 40, t: 0, color: k.color,
-      glyph: ['♪', '♫', '♩', '♬'][(Math.random() * 4) | 0], size: Math.max(22, unit() * 0.06) });
+    puff(k, ['♪', '♫', '♩', '♬'][(Math.random() * 4) | 0]);
     if (!settings.sound || !audio()) return null;
     return startVoice(settings.voice, midiFreq(k.midi));
   }
   function releaseKey(f) {
     if (!f || !f.key) return;
-    const n = (held.get(f.key.midi) || 1) - 1;
-    n ? held.set(f.key.midi, n) : held.delete(f.key.midi);
+    bump(held, f.key.midi, -1);
     if (f.voice) f.voice.stop();
     if (f.ev && rec) f.ev.dur = Math.max(0.08, clock() - rec.t0 - f.ev.t);
   }
@@ -306,12 +307,11 @@
   let rec = null, take = null, playing = null;
   const ghost = new Map(); // keys lit by playback
   function recEvent(ev) { if (!rec) return null; ev.t = clock() - rec.t0; rec.events.push(ev); return ev; }
-  function beep(f) { if (settings.sound && audio()) { const v = startVoice('bells', f); setTimeout(() => v.stop(), 120); } }
-  function startRec() { stopPlay(); rec = { t0: clock(), events: [] }; beep(midiFreq(72)); }
+  function startRec() { stopPlay(); rec = { t0: clock(), events: [] }; blip('bells', 72, 120); }
   function stopRec() {
     if (!rec) return;
     if (rec.events.length) take = rec.events;
-    rec = null; beep(midiFreq(67));
+    rec = null; blip('bells', 67, 120);
   }
   function startPlay() {
     if (!take || !audio()) return;
@@ -321,13 +321,13 @@
     for (const ev of take) P.timers.push(setTimeout(() => {
       if (ev.kind === 'pad') { if (settings.sound) PADS[ev.id](actx.currentTime); const b = buttons.find(b => b.id === ev.id); if (b) b.bounce = 1; return; }
       const k = keys.find(k => k.midi === ev.midi);
-      ghost.set(ev.midi, (ghost.get(ev.midi) || 0) + 1);
-      if (k) notes.push({ x: k.x + k.w / 2, y: k.y - 6, vx: (Math.random() - 0.5) * 40, t: 0, color: k.color, glyph: '♪', size: Math.max(22, unit() * 0.06) });
+      bump(ghost, ev.midi, 1);
+      if (k) puff(k, '♪');
       const v = settings.sound ? startVoice(ev.voice, midiFreq(ev.midi)) : null;
       if (v) P.voices.add(v);
       P.timers.push(setTimeout(() => {
         if (v) { v.stop(); P.voices.delete(v); }
-        const n = (ghost.get(ev.midi) || 1) - 1; n ? ghost.set(ev.midi, n) : ghost.delete(ev.midi);
+        bump(ghost, ev.midi, -1);
       }, ev.dur * 1000));
     }, ev.t * 1000));
     P.timers.push(setTimeout(() => { if (playing === P) playing = null; }, (end + 0.3) * 1000));
@@ -346,15 +346,15 @@
     if (b.pad) { if (settings.sound) PADS[b.id](actx.currentTime); recEvent({ kind: 'pad', id: b.id }); return; }
     settings.voice = b.id; saveSettings();
     // a quick hello in the new sound
-    if (settings.sound) { const v = startVoice(b.id, midiFreq(67)); setTimeout(() => v.stop(), 250); }
+    blip(b.id, 67, 250);
   }
 
+  const grab = k => k ? { key: k, voice: pressKey(k), ev: recEvent({ kind: 'key', midi: k.midi, voice: settings.voice, dur: 0.4 }) } : {};
   cv.addEventListener('pointerdown', e => {
     e.preventDefault(); audio();
     const b = buttonAt(e.clientX, e.clientY);
     if (b) { tapButton(b); fingers.set(e.pointerId, { button: b }); return; }
-    const k = keyAt(e.clientX, e.clientY);
-    fingers.set(e.pointerId, k ? { key: k, voice: pressKey(k), ev: recEvent({ kind: 'key', midi: k.midi, voice: settings.voice, dur: 0.4 }) } : {});
+    fingers.set(e.pointerId, grab(keyAt(e.clientX, e.clientY)));
   });
   cv.addEventListener('pointermove', e => {
     const f = fingers.get(e.pointerId);
@@ -363,7 +363,7 @@
     const k = keyAt(e.clientX, e.clientY);
     if (k === (f.key || null)) return;
     releaseKey(f);
-    fingers.set(e.pointerId, k ? { key: k, voice: pressKey(k), ev: recEvent({ kind: 'key', midi: k.midi, voice: settings.voice, dur: 0.4 }) } : {});
+    fingers.set(e.pointerId, grab(k));
   });
   const lift = e => { releaseKey(fingers.get(e.pointerId)); fingers.delete(e.pointerId); };
   addEventListener('pointerup', lift); addEventListener('pointercancel', lift);
@@ -502,24 +502,24 @@
   // ---------- Grown-up panel (press & hold 1.5s) ----------
   const pb = document.getElementById('parentBtn'), panel = document.getElementById('panel');
   let holdTimer = null;
-  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); holdTimer = setTimeout(openPanel, 1500); };
+  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); clearTimeout(holdTimer); holdTimer = setTimeout(openPanel, 1500); };
   const endHold = () => { pb.classList.remove('holding'); clearTimeout(holdTimer); };
   pb.addEventListener('pointerdown', startHold);
   pb.addEventListener('pointerup', endHold); pb.addEventListener('pointerleave', endHold); pb.addEventListener('pointercancel', endHold);
 
   function openPanel() { endHold(); releaseAll(); syncPanel(); panel.classList.add('open'); }
+  const each = (sel, fn) => document.querySelectorAll(sel).forEach(fn);
   function syncPanel() {
-    document.querySelectorAll('[data-beat]').forEach(b => b.classList.toggle('on', +b.dataset.beat === settings.beat));
-    document.querySelectorAll('[data-labels]').forEach(b => b.classList.toggle('on', b.dataset.labels === settings.labels));
-    document.querySelectorAll('[data-song]').forEach(b => b.classList.toggle('on', b.dataset.song === settings.song));
-    const range = settings.range || autoRange();
-    document.querySelectorAll('[data-range]').forEach(b => b.classList.toggle('on', +b.dataset.range === range));
+    each('[data-beat]', b => b.classList.toggle('on', +b.dataset.beat === settings.beat));
+    each('[data-labels]', b => b.classList.toggle('on', b.dataset.labels === settings.labels));
+    each('[data-song]', b => b.classList.toggle('on', b.dataset.song === settings.song));
+    each('[data-range]', b => b.classList.toggle('on', +b.dataset.range === (settings.range || autoRange())));
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
   }
-  document.querySelectorAll('[data-beat]').forEach(b => b.onclick = () => { settings.beat = +b.dataset.beat; saveSettings(); syncPanel(); audio(); });
-  document.querySelectorAll('[data-song]').forEach(b => b.onclick = () => { settings.song = b.dataset.song; songPos = 0; songDone = 0; saveSettings(); syncPanel(); });
-  document.querySelectorAll('[data-labels]').forEach(b => b.onclick = () => { settings.labels = b.dataset.labels; saveSettings(); syncPanel(); });
-  document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { settings.range = +b.dataset.range; saveSettings(); layout(); syncPanel(); });
+  each('[data-beat]', b => b.onclick = () => { settings.beat = +b.dataset.beat; saveSettings(); syncPanel(); audio(); });
+  each('[data-song]', b => b.onclick = () => { settings.song = b.dataset.song; songPos = 0; songDone = 0; saveSettings(); syncPanel(); });
+  each('[data-labels]', b => b.onclick = () => { settings.labels = b.dataset.labels; saveSettings(); syncPanel(); });
+  each('[data-range]', b => b.onclick = () => { settings.range = +b.dataset.range; saveSettings(); layout(); syncPanel(); });
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
   document.getElementById('tFull').onclick = () => {
     const el = document.documentElement;
