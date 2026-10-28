@@ -131,6 +131,7 @@
   STAMPS.mix = [...STAMPS.animals, ...STAMPS.shapes, ...STAMPS.nature];
   const BRIGHT = ['#ff3b3b', '#ff9a1f', '#f5c800', '#22b84a', '#2f7bff', '#a04dff', '#ff4fb0'];
   const pick = a => a[(Math.random() * a.length) | 0];
+  const EMOJI = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
 
   // ---------- Settings (only settings are saved) ----------
   const KEY = 'magicPaint.kids.v1';
@@ -157,11 +158,9 @@
     pctx.setTransform(1, 0, 0, 1, 0, 0);
     if (keep.width) pctx.drawImage(keep, 0, 0);
     pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (typeof drawOutline === 'function') {
-      // a coloring page stays where it is (so the paint still lines up) unless it no longer fits
-      if (page && (page.cx - page.S < 0 || page.cx + page.S > W || page.cy - page.S < 0 || page.cy + page.S > H)) { clearPaint(); page = { name: page.name, ...pageBox() }; }
-      drawOutline();
-    }
+    // a coloring page stays where it is (so the paint still lines up) unless it no longer fits
+    if (page && (page.cx - page.S < 0 || page.cx + page.S > W || page.cy - page.S < 0 || page.cy + page.S > H)) { clearPaint(); page = { name: page.name, ...pageBox() }; }
+    drawOutline();
   }
   addEventListener('resize', resize);
   const unit = () => Math.min(W, H);
@@ -219,7 +218,7 @@
   }
 
   function paintSegment(s, x, y) {
-    const c = strokeColor(s, Math.hypot(x - s.x, y - s.y));
+    const d = Math.hypot(x - s.x, y - s.y), c = strokeColor(s, d);
     pctx.save();
     pctx.lineCap = pctx.lineJoin = 'round';
     pctx.lineWidth = brushWidth();
@@ -231,7 +230,7 @@
     pctx.quadraticCurveTo(s.x, s.y, mx, my); pctx.lineTo(x, y);
     pctx.stroke();
     pctx.restore();
-    s.travel += Math.hypot(x - s.x, y - s.y);
+    s.travel += d;
     s.x = x; s.y = y;
     if (s.travel > unit() * 0.09) { s.travel = 0; brushNote(y); }
     if (Math.random() < 0.35) sparks.push({ x, y, vx: (Math.random() - 0.5) * 80, vy: (Math.random() - 0.5) * 80, t: 0, life: 0.5, r: 2 + Math.random() * 3, color: c });
@@ -240,15 +239,19 @@
   function addStamp(x, y) {
     stampSound();
     stamps.push({ x, y, glyph: pick(STAMPS[settings.stamps] || STAMPS.mix), t: 0, size: unit() * (0.11 + Math.random() * 0.05), rot: (Math.random() - 0.5) * 0.5 });
-    for (let k = 0; k < 12; k++) {
-      const a = (k / 12) * Math.PI * 2, sp = unit() * 0.3;
-      sparks.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, life: 0.45, r: 3 + Math.random() * 3, color: pick(BRIGHT) });
+    burst(x, y, 12, unit() * 0.3);
+  }
+
+  function burst(x, y, n, speed, color) {
+    for (let k = 0; k < n; k++) {
+      const a = k / n * TAU;
+      sparks.push({ x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, t: 0, life: 0.45, r: 3 + Math.random() * 3, color: color || pick(BRIGHT) });
     }
   }
 
   function drawStamp(g, s, scale) {
     g.save(); g.translate(s.x, s.y); g.rotate(s.rot);
-    g.font = `${s.size * scale}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    g.font = `${s.size * scale}px ${EMOJI}`;
     g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#000'; // keep emoji fully opaque
     g.fillText(s.glyph, 0, s.size * 0.06);
     g.restore();
@@ -302,15 +305,14 @@
       p(...pts); c(-0.13, 0.02, 0.05); c(0.13, 0.02, 0.05); a(0, 0.1, 0.12, 0.3, Math.PI - 0.3);
     },
   };
-  const PAGE_ORDER = ['', 'sun', 'fish', 'house', 'car', 'flower', 'butterfly', 'cat', 'star'];
+  const PAGE_ORDER = ['', ...Object.keys(PAGES)];
   const outline = document.createElement('canvas'), octx = outline.getContext('2d');
   let page = null, wall = null; // page: { name, cx, cy, S }; wall: 1 where a line is
   const fills = [];
   function pageBox() {
     // keep clear of the kid color buttons: a column on the left when tall, a row on top when wide
     const showPal = settings.palette !== 'hide', portrait = H > W;
-    const padL = (portrait && showPal ? 84 : 16) + (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sal')) || 0);
-    const padT = (!portrait && showPal ? 84 : 20) + (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sat')) || 0);
+    const padL = portrait && showPal ? 84 : 16, padT = !portrait && showPal ? 84 : 20;
     const aw = W - padL - 16, ah = H - padT - 28;
     return { cx: padL + aw / 2, cy: padT + ah / 2, S: Math.min(aw, ah) * 0.45 };
   }
@@ -375,10 +377,10 @@
       const k = (yy * fw + xx) * 4; img.data[k] = r; img.data[k + 1] = g; img.data[k + 2] = b; img.data[k + 3] = 255;
     }
     fx.putImageData(img, 0, 0);
-    const far = Math.max(Math.hypot(x0 - px, y0 - py), Math.hypot(x1 - px, y0 - py), Math.hypot(x0 - px, y1 - py), Math.hypot(x1 - px, y1 - py));
+    const far = Math.hypot(Math.max(px - x0, x1 - px), Math.max(py - y0, y1 - py)); // farthest corner
     fills.push({ fc, x0, y0, px, py, far, t: 0 });
     pourSound();
-    for (let k = 0; k < 10; k++) { const a = k / 10 * TAU, v = unit() * 0.25; sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: 0.45, r: 3 + Math.random() * 3, color: css }); }
+    burst(x, y, 10, unit() * 0.25, css);
     return true;
   }
   function pourSound() {
@@ -471,25 +473,24 @@
     for (const p of sparks) {
       const k = 1 - p.t / p.life;
       ctx.globalAlpha = k; ctx.fillStyle = p.color;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * k, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * k, 0, TAU); ctx.fill();
     }
     ctx.globalAlpha = 1;
-    if (blank && idle > 2 && page) {
-      // on a coloring page the hint taps instead: a finger bobbing in a shape, with a ripple
-      const t = (idle % 1.4) / 1.4, x = page.cx - page.S * 0.05, y = page.cy + page.S * 0.12;
-      ctx.globalAlpha = Math.min(1, (idle - 2) * 2) * (1 - t) * 0.8;
-      ctx.lineWidth = 4; ctx.strokeStyle = '#ff6fb1'; ctx.beginPath(); ctx.arc(x, y, 10 + t * unit() * 0.08, 0, TAU); ctx.stroke();
-      ctx.globalAlpha = Math.min(1, (idle - 2) * 2) * 0.85;
-      ctx.font = `${Math.max(44, unit() * 0.1)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    if (blank && idle > 2) {
+      // the ghost finger: on a coloring page it taps in a shape with a ripple, on a blank page it loops
+      const fade = Math.min(1, (idle - 2) * 2);
+      let x, y;
+      if (page) {
+        const t = (idle % 1.4) / 1.4;
+        x = page.cx - page.S * 0.05; y = page.cy + page.S * 0.12;
+        ctx.globalAlpha = fade * (1 - t) * 0.8;
+        ctx.lineWidth = 4; ctx.strokeStyle = '#ff6fb1'; ctx.beginPath(); ctx.arc(x, y, 10 + t * unit() * 0.08, 0, TAU); ctx.stroke();
+        y -= Math.abs(Math.sin(t * Math.PI)) * 8;
+      } else ({ x, y } = hintPos(hintT));
+      ctx.globalAlpha = fade * 0.85;
+      ctx.font = `${Math.max(44, unit() * 0.1)}px ${EMOJI}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#000';
-      ctx.fillText('👆', x, y + Math.abs(Math.sin(t * Math.PI)) * -8);
-      ctx.globalAlpha = 1;
-    } else if (blank && idle > 2) {
-      const h = hintPos(hintT);
-      ctx.globalAlpha = Math.min(1, (idle - 2) * 2) * 0.85;
-      ctx.font = `${Math.max(44, unit() * 0.1)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#000';
-      ctx.fillText('👆', h.x, h.y);
+      ctx.fillText('👆', x, y);
       ctx.globalAlpha = 1;
     }
   }
@@ -501,7 +502,7 @@
   // ---------- Grown-up panel (press & hold 1.5s) ----------
   const pb = document.getElementById('parentBtn'), panel = document.getElementById('panel');
   let holdTimer = null;
-  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); holdTimer = setTimeout(openPanel, 1500); };
+  const startHold = e => { e.preventDefault(); pb.classList.add('holding'); clearTimeout(holdTimer); holdTimer = setTimeout(openPanel, 1500); };
   const endHold = () => { pb.classList.remove('holding'); clearTimeout(holdTimer); };
   pb.addEventListener('pointerdown', startHold);
   pb.addEventListener('pointerup', endHold); pb.addEventListener('pointerleave', endHold); pb.addEventListener('pointercancel', endHold);
