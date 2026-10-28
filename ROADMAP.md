@@ -21,7 +21,7 @@ Roughly in priority order. None are committed to. Check with the owner before st
 4. **Shared grown-up settings:** sound on or off and an optional play-time limit, set once on the home page and read by every game.
 5. **Magic Paint: more pictures** (dinosaur, truck, rocket) and a few with more detail for older kids.
 6. **Little Band: keep the last recording** in `localStorage` so it survives a reload.
-7. **Magic Paint: don't lose a painting to 🖼️.** The kid-facing picture button switches the page and wipes the paint in one tap. Keep the old painting or ask first.
+7. **Magic Paint: don't lose a painting to 🖼️.** The kid-facing picture button switches the page and wipes the paint in one tap, and so does a different tile in the big-screen picture strip (the current page's tile is safe). Keep each page's painting or ask first.
 8. **Web Hero: a cancelled pull still fires.** When the browser cancels a pull (`pointercancel`, e.g. a system popup), the shot is dropped. Firing what was aimed would fit "a broken drag still does something sensible".
 9. **Where's the Cow?** A listening and vocabulary game for ages 3–4: animals shown, "Can you find the cow?" asked. Partly covered now by Bubble Pop's Find it mode.
 
@@ -57,3 +57,4 @@ Roughly in priority order. None are committed to. Check with the owner before st
   - **Testing:** `?debug` hooks added for testing.
 - **Web Hero:** the owner wanted a slingshot game in the style of Spider-Man web shooters and Angry Birds for their 4-year-old, with trucks and cars as targets. It was made with an original masked-kid hero, for trademark reasons. Built from a written plan by a separate Sonnet session; v1 is knock-down only.
 - **Code review and cleanup:** four parallel Sonnet sessions, one per game, reviewed the second pass for bugs and bloat. A quick two-finger tap on ⚙️ opened the grown-up panel 1.5s later in every game (`startHold` now clears the old timer), and Bubble Pop's Find it badge ignored the notch. Dead code and copy-paste were folded into small helpers; the games look and play the same.
+- **Magic Paint picture strip:** the owner asked for the coloring pages to show down the side on bigger screens, instead of cycling 🖼️. Also fixed taps on thick lines dropping stickers onto coloring pages.

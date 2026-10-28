@@ -32,6 +32,11 @@
   #palette button.on { transform: scale(1.18); box-shadow: 0 0 0 4px #2b2d5c, 0 3px 10px rgba(43,45,92,.25); }
   @media (orientation: portrait) { #palette { flex-direction: column; } #palette button { --s: min(64px, calc((100vh - 140px) / 8)); } }
   #palette button.page { background: #fff; font-size: calc(var(--s) * 0.5); line-height: 1; border-color: #ffd23f; }
+  /* big screens: every coloring page as a picture tile down the right side */
+  #pages { position: fixed; right: calc(10px + env(safe-area-inset-right)); top: 50%; transform: translateY(-50%); display: none; flex-direction: column; gap: 8px; z-index: 2; }
+  #pages.show { display: flex; }
+  #pages button { --s: min(72px, calc((100vh - 170px) / 9 - 8px)); width: var(--s); height: var(--s); border-radius: 16px; border: 4px solid #fff; padding: 0; background: #fff center / 88% no-repeat; font-size: calc(var(--s) * 0.5); line-height: 1; box-shadow: 0 3px 10px rgba(43,45,92,.25); transition: transform .15s; touch-action: none; }
+  #pages button.on { transform: scale(1.12); box-shadow: 0 0 0 4px #2b2d5c, 0 3px 10px rgba(43,45,92,.25); }
   #palette button[data-color="rainbow"] { background: conic-gradient(#ff3b3b, #ff9a1f, #f5c800, #22b84a, #2f7bff, #a04dff, #ff3b3b); }
   #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; overflow-y: auto; padding: 16px 0; }
   #panel.open { display: flex; }
@@ -50,6 +55,7 @@
 <body>
 <canvas id="c"></canvas>
 
+<div id="pages" aria-label="Pictures to color"></div>
 <div id="palette" aria-label="Paint colors">
   <button data-color="rainbow" aria-label="Rainbow"></button>
   <button data-color="#ff3b3b" style="background:#ff3b3b" aria-label="Red"></button>
@@ -310,11 +316,22 @@
   let page = null, wall = null, lineW = 0; // page: { name, cx, cy, S }; wall: 1 where a line is; lineW in device px
   const fills = [];
   function pageBox() {
-    // keep clear of the kid color buttons: a column on the left when tall, a row on top when wide
+    // keep clear of the kid color buttons: a column on the left when tall, a row on top when wide, plus the picture strip
     const showPal = settings.palette !== 'hide', portrait = H > W;
-    const padL = portrait && showPal ? 84 : 16, padT = !portrait && showPal ? 84 : 20;
-    const aw = W - padL - 16, ah = H - padT - 28;
+    const padL = portrait && showPal ? 84 : 16, padT = !portrait && showPal ? 84 : 20, padR = bigStrip() ? 104 : 16;
+    const aw = W - padL - padR, ah = H - padT - 28;
     return { cx: padL + aw / 2, cy: padT + ah / 2, S: Math.min(aw, ah) * 0.45 };
+  }
+  // strokes a page into g, which is already scaled to the -1..1 box
+  function drawLines(g, name) {
+    const shape = (build) => (...a) => { g.beginPath(); build(...a); g.stroke(); };
+    PAGES[name]({
+      c: shape((x, y, r) => g.arc(x, y, r, 0, TAU)),
+      e: shape((x, y, rx, ry, rot = 0) => g.ellipse(x, y, rx, ry, rot, 0, TAU)),
+      p: shape((...q) => { for (let i = 0; i < q.length; i += 2) g.lineTo(q[i], q[i + 1]); g.closePath(); }),
+      l: shape((...q) => { for (let i = 0; i < q.length; i += 2) g.lineTo(q[i], q[i + 1]); }),
+      a: shape((x, y, r, a0, a1) => g.arc(x, y, r, a0, a1)),
+    });
   }
   function drawOutline() {
     outline.width = cv.width; outline.height = cv.height; wall = null;
@@ -324,14 +341,7 @@
     lineW = Math.max(5, S * 0.035) * dpr;
     g.lineWidth = lineW / dpr / S; g.lineCap = g.lineJoin = 'round';
     g.strokeStyle = night() ? '#ffffff' : '#2b2d5c';
-    const shape = (build) => (...a) => { g.beginPath(); build(...a); g.stroke(); };
-    PAGES[page.name]({
-      c: shape((x, y, r) => g.arc(x, y, r, 0, TAU)),
-      e: shape((x, y, rx, ry, rot = 0) => g.ellipse(x, y, rx, ry, rot, 0, TAU)),
-      p: shape((...q) => { for (let i = 0; i < q.length; i += 2) g.lineTo(q[i], q[i + 1]); g.closePath(); }),
-      l: shape((...q) => { for (let i = 0; i < q.length; i += 2) g.lineTo(q[i], q[i + 1]); }),
-      a: shape((x, y, r, a0, a1) => g.arc(x, y, r, a0, a1)),
-    });
+    drawLines(g, page.name);
     g.setTransform(1, 0, 0, 1, 0, 0);
     const d = g.getImageData(0, 0, outline.width, outline.height).data;
     wall = new Uint8Array(outline.width * outline.height);
@@ -341,7 +351,7 @@
     clearPaint();
     settings.page = name || ''; saveSettings();
     page = settings.page ? { name: settings.page, ...pageBox() } : null;
-    drawOutline(); blank = true; idle = 0;
+    drawOutline(); blank = true; idle = 0; syncPages();
   }
   // flood-fill the open area under the finger, then pour it in from that spot
   const rgbOf = (() => { const c = document.createElement('canvas').getContext('2d', { willReadFrequently: true }); c.canvas.width = c.canvas.height = 1;
@@ -526,6 +536,7 @@
   const palette = document.getElementById('palette');
   function syncPalette() {
     palette.classList.toggle('hidden', settings.palette === 'hide');
+    syncPages();
     palette.querySelectorAll('button[data-color]').forEach(b => b.classList.toggle('on', b.dataset.color === settings.brush));
   }
   // the picture button flips to the next coloring page (blank, sun, fish, ...)
@@ -538,6 +549,34 @@
     settings.brush = b.dataset.color; saveSettings(); syncPalette();
     if (settings.sound && actx) tone(NOTES[i], actx.currentTime, 0.35, 'triangle', 0.12);
   }));
+
+  // ---------- Picture strip (big screens): tap a picture to color it ----------
+  const pagesEl = document.getElementById('pages');
+  function bigStrip() { return settings.palette !== 'hide' && Math.min(W, H) >= 700; }
+  for (const name of PAGE_ORDER) {
+    const b = document.createElement('button');
+    b.dataset.page = name; b.setAttribute('aria-label', name || 'Blank paper');
+    if (name) {
+      const t = document.createElement('canvas'), g = t.getContext('2d');
+      t.width = t.height = 120;
+      g.setTransform(54, 0, 0, 54, 60, 60); g.lineWidth = 7 / 54; g.lineCap = g.lineJoin = 'round'; g.strokeStyle = '#2b2d5c';
+      drawLines(g, name);
+      b.style.backgroundImage = `url(${t.toDataURL()})`;
+    } else b.textContent = '🖌️';
+    b.addEventListener('pointerdown', e => {
+      e.preventDefault(); audio();
+      if (name === settings.page) return; // tapping the picture you're on mustn't wipe it
+      setPage(name); whooshSound();
+    });
+    pagesEl.appendChild(b);
+  }
+  function syncPages() {
+    const big = bigStrip();
+    pagesEl.classList.toggle('show', big);
+    palette.querySelector('.page').style.display = big ? 'none' : ''; // the strip replaces the cycle button
+    pagesEl.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.page === settings.page));
+  }
+  addEventListener('resize', syncPages);
   syncPalette();
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
   document.getElementById('tClear').onclick = () => { clearPaint(); whooshSound(); blank = true; idle = 0; };
@@ -567,6 +606,7 @@
 
   resize();
   if (settings.page && PAGES[settings.page]) { page = { name: settings.page, ...pageBox() }; drawOutline(); }
+  syncPages();
   requestAnimationFrame(loop);
 
   // Offline support (only works over HTTPS or localhost)
