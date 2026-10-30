@@ -11,7 +11,9 @@
 <meta name="apple-mobile-web-app-title" content="Little Band">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ffd88a">
+<link rel="preload" href="../shared/KidsRounded.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  @font-face { font-family: "Kids Rounded"; src: url("../shared/KidsRounded.woff2") format("woff2"); font-weight: 100 900; font-display: block; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   body { background: linear-gradient(180deg, #ffd88a 0%, #ffb3a7 55%, #c9b8ff 100%); }
@@ -27,7 +29,7 @@
   #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; overflow-y: auto; padding: 16px 0; }
   #panel.open { display: flex; }
   .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); margin: auto; }
-  .card h2 { margin: 0 0 4px; }
+  .card h2 { margin: 0 0 4px; font-family: "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; }
   .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
   .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
   .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -37,6 +39,7 @@
   .toggles button.off { opacity: .45; }
   .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
 </style>
+<link rel="stylesheet" href="../shared/grownup.css">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -77,10 +80,12 @@
       <button id="tSound">🔊 Sounds</button>
       <button id="tFull" style="grid-column: span 2">⛶ Full screen</button>
     </div>
+    <div data-kg-panel></div>
     <button class="done" id="done">Let's play!</button>
   </div>
 </div>
 
+<script src="../shared/grownup.js"></script>
 <script>
 (() => {
   // ---------- Settings (only settings are saved) ----------
@@ -91,13 +96,14 @@
 
   // ---------- Audio: every instrument is made right here, no sound files ----------
   let actx = null, master = null, noiseBuf = null;
+  let vol = 1, asleep = false; // vol: the grown-up timer's wind-down multiplier; asleep: goodnight, so nothing makes a sound
   const LIMITER_TRIM = 0.535;
   function audio() {
     if (!actx) {
       try {
         actx = new (window.AudioContext || window.webkitAudioContext)();
         // everything (notes, drums, the beat) goes master -> limiter -> speakers, so a pile of held notes can't clip
-        master = actx.createGain(); master.gain.value = 0.8;
+        master = actx.createGain(); master.gain.value = 0.8 * vol;
         const limiter = actx.createDynamicsCompressor();
         limiter.threshold.value = -12; limiter.knee.value = 6; limiter.ratio.value = 12; limiter.attack.value = 0.003; limiter.release.value = 0.25;
         // the compressor adds makeup gain (about +5 dB, the same for every note); this takes it back out so one note sounds as before
@@ -107,7 +113,7 @@
         const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
       } catch (e) {}
     }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (actx && actx.state === 'suspended' && !asleep) actx.resume();
     return actx;
   }
   const midiFreq = m => 440 * 2 ** ((m - 69) / 12);
@@ -512,7 +518,7 @@
       // the label sits near the bottom where a finger doesn't cover it
       const cx = k.x + k.w / 2, cy = k.y + k.h - Math.min(k.w * 0.5, k.h * 0.12);
       if (settings.labels === 'letters') {
-        c.font = `900 ${Math.min(k.w * 0.5, 34)}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
+        c.font = `900 ${Math.min(k.w * 0.5, 34)}px "Kids Rounded","Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
         c.textAlign = 'center'; c.textBaseline = 'middle';
         c.fillStyle = down ? '#fff' : k.color; c.fillText(k.name, cx, cy);
       } else {
@@ -571,7 +577,7 @@
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const n of notes) {
       ctx.globalAlpha = Math.max(0, 1 - n.t / 1.1);
-      ctx.font = `900 ${n.size}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
+      ctx.font = `900 ${n.size}px "Kids Rounded","Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
       ctx.lineWidth = n.size * 0.12; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round';
       ctx.strokeText(n.glyph, n.x, n.y); ctx.fillStyle = n.color; ctx.fillText(n.glyph, n.x, n.y);
     }
@@ -620,6 +626,13 @@
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
 
   requestAnimationFrame(loop);
+  // The shared grown-up timer eases the sound down at bedtime and stops it at goodnight
+  if (window.KidsGrownup) KidsGrownup.register({
+    setVolume(v) { vol = v; asleep = false; if (master) master.gain.setTargetAtTime(0.8 * v, actx.currentTime, 0.3); },
+    pause() { asleep = true; releaseAll(); stopPlay(); if (rec) stopRec(); if (actx) actx.suspend(); },
+  });
+  // Canvas text doesn't wait for web fonts: the key labels live in the cached layers, so build them again once the font is in
+  if (document.fonts && document.fonts.load) document.fonts.load('900 64px "Kids Rounded"').then(() => rebuild(), () => {});
 
   // Offline support (only works over HTTPS or localhost)
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});

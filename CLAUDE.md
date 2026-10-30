@@ -9,7 +9,8 @@ Touch web games for the owner's young kids (about 18 months to 5 years; the olde
 ## Layout
 
 ```
-index.html              home page: one illustrated tile per game
+index.html              home page: one illustrated tile per game, plus its own ⚙️ for Play time
+shared/                 used by every page: KidsRounded.woff2 (+ OFL license), grownup.js, grownup.css
 README.md               game list (keep in sync when adding or changing a game)
 ROADMAP.md              backlog, ideas, history, open questions
 <game>/index.html       the whole game: inline CSS + JS, one full-screen <canvas>
@@ -56,13 +57,21 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Sound limiter:** every game puts a `DynamicsCompressorNode` (threshold -12 dB, knee 6, ratio 12, attack 0.003, release 0.25) between its master gain and `actx.destination`, so piles of sounds don't distort on tablet speakers.
 - **Offline (`sw.js`):** stale-while-revalidate over a fixed `FILES` list.
   - **Prefix cleanup:** all games share one origin, so `activate` may delete only caches starting with that game's prefix (`k.startsWith('<game>-')`). Never delete other games' caches.
-  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v5`, `magic-paint-v7`, `little-band-v6`, `web-hero-v4`. Bumping gets installed copies to update.
-  - **New files:** add any file the game needs to `FILES`.
-- **Look:** soft pastel gradients and white-outlined shapes. Fonts are "Trebuchet MS" for UI and "Arial Rounded MT Bold" for big glyphs; ink is `#2b2d5c`; the bright palette is `#ff3b3b #ff9a1f #f5c800 #22b84a #2f7bff #a04dff #ff4fb0`.
+  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v7`, `magic-paint-v9`, `little-band-v8`, `web-hero-v6`. Bumping gets installed copies to update.
+  - **New files:** add any file the game needs to `FILES`. Every game also lists `../shared/KidsRounded.woff2`, `../shared/grownup.js` and `../shared/grownup.css` (same origin, so the paths work).
+- **Look:** soft pastel gradients and white-outlined shapes. Fonts are "Trebuchet MS" for UI and "Kids Rounded" (bundled Nunito ExtraBold, then "Arial Rounded MT Bold") for big glyphs; ink is `#2b2d5c`; the bright palette is `#ff3b3b #ff9a1f #f5c800 #22b84a #2f7bff #a04dff #ff4fb0`.
+
+## Shared font and grown-up timer (`shared/`)
+
+- **Font:** `KidsRounded.woff2` is Nunito ExtraBold (OFL, license beside it), Latin subset, 12KB, family `"Kids Rounded"`. Each page declares it with `@font-face` (`font-display: block`, `../shared/` path) plus a `<link rel="preload">`. Put `"Kids Rounded"` first wherever big glyphs are drawn. Canvas text doesn't wait for fonts, so a game with cached text calls `document.fonts.load('900 64px "Kids Rounded"')` and then its rebuild function (Bubble Pop `buildSprites()`, Little Band `rebuild()`). Nothing waits on it: play starts with the fallback and swaps in.
+- **Timer:** `grownup.js` + `grownup.css` need no setup beyond one `<link>`, one `<script>` (before the game's own script), a `<div data-kg-panel></div>` inside the grown-up panel (it renders the Play time controls) and one register call: `KidsGrownup.register({ setVolume(v), pause() })`. `setVolume` multiplies the master gain before the limiter (eased with `setTargetAtTime`); `pause()` ends any drag or held note, cancels speech, and suspends the `AudioContext` (the game keeps an `asleep` flag so `audio()` doesn't resume it). `KidsGrownup.mountPanel(el)` renders the controls anywhere (the home page uses it).
+- **Storage:** `kidsGames.grownup.v1` = `{ limit (minutes, 0 off, 5 to 120), show ('ring' | 'ring+minutes' | 'hidden'), remainingMs, lastTick, state ('playing' | 'winding' | 'goodnight') }`. One clock for all games; it counts only while a page is visible (delta capped at 1.5s per tick), saves about every 5s and on pagehide, and starts a new session when `lastTick` is more than 6h old or the limit changes.
+- **Behavior:** with the limit off nothing is added to the DOM. The ring (`pointer-events: none`) sits left of `#parentBtn`, so don't put game UI in that corner. The last 2 minutes: ring becomes a growing moon, a dusky tint up to 25%, volume to 60%. At zero a full-screen goodnight overlay (z-index 4, under each game's `#panel` at 5) fades in over 3s; a capture-phase listener stops the game from seeing pointer or key events. Its own press-and-hold ⚙️ opens "+5 minutes, +15 minutes, New session, Turn the limit off".
+- **Debug:** `?debug` gives `window.__grownup()`; `?debug&fast` makes a minute last a second. (Web Hero's `?debug` also draws body outlines, so use the stored state to screenshot it.)
 
 ## Adding a game (checklist)
 
-1. **Make the folder:** create `<game>/` with `index.html`, the manifest, `sw.js` (new prefix) and icons. Draw the icons with Python PIL, flat shapes on a gradient like the others, and avoid looking like any brand.
+1. **Make the folder:** create `<game>/` with `index.html`, the manifest, `sw.js` (new prefix) and icons. Include the shared font and timer as described in the shared section above. Draw the icons with Python PIL, flat shapes on a gradient like the others, and avoid looking like any brand.
 2. **Draw the cover:** `<game>/cover.svg`, 800x500, in the same polished style as the existing covers. Render it in the browser and refine it.
 3. **Add the home tile:** in `index.html`, copy an `<a class="game">` tile and set `--accent`/`--tint`, the cover, icon, title and a one-line description.
 4. **Update the docs:** add the game to `README.md` and to the game notes below. Move its ROADMAP entry to History.

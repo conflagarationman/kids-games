@@ -11,7 +11,9 @@
 <meta name="apple-mobile-web-app-title" content="Bubble Pop">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#8fd8ff">
+<link rel="preload" href="../shared/KidsRounded.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  @font-face { font-family: "Kids Rounded"; src: url("../shared/KidsRounded.woff2") format("woff2"); font-weight: 100 900; font-display: block; }
   :root { --sat: env(safe-area-inset-top); }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
@@ -24,10 +26,10 @@
   #parentBtn.holding .ring { animation: fill 1.5s linear forwards; }
   @keyframes fill { to { clip-path: inset(0 0 0 0); } }
 
-  #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; }
+  #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; overflow-y: auto; padding: 16px 0; }
   #panel.open { display: flex; }
-  .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
-  .card h2 { margin: 0 0 4px; }
+  .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); margin: auto; }
+  .card h2 { margin: 0 0 4px; font-family: "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; }
   .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
   .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
   .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -37,6 +39,7 @@
   .toggles button.off { opacity: .45; }
   .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
 </style>
+<link rel="stylesheet" href="../shared/grownup.css">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -73,10 +76,12 @@
       <button data-speed="1">🐇 Normal</button>
       <button data-speed="1.7" style="grid-column: span 2">🚀 Super fast</button>
     </div>
+    <div data-kg-panel></div>
     <button class="done" id="done">Let's play!</button>
   </div>
 </div>
 
+<script src="../shared/grownup.js"></script>
 <script>
 (() => {
   // ---------- Content ----------
@@ -140,17 +145,19 @@
 
   // ---------- Audio ----------
   let actx = null, out = null;
+  let vol = 1, asleep = false; // vol: the grown-up timer's wind-down multiplier; asleep: goodnight, so nothing makes a sound
   function audio() {
     if (!actx) {
       try {
         actx = new (window.AudioContext || window.webkitAudioContext)();
         // a limiter on the way out, so a pile-up of pops (kids mash the screen) never clips
-        out = actx.createDynamicsCompressor();
-        out.threshold.value = -12; out.knee.value = 6; out.ratio.value = 12; out.attack.value = 0.003; out.release.value = 0.25;
-        out.connect(actx.destination);
+        const lim = actx.createDynamicsCompressor();
+        lim.threshold.value = -12; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25;
+        lim.connect(actx.destination);
+        out = actx.createGain(); out.gain.value = vol; out.connect(lim);
       } catch (e) {}
     }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (actx && actx.state === 'suspended' && !asleep) actx.resume();
     return actx;
   }
   // Major pentatonic, so any run of pops sounds like a little tune
@@ -194,11 +201,11 @@
   }
   if ('speechSynthesis' in window) { chooseVoice(); speechSynthesis.onvoiceschanged = chooseVoice; }
   function say(text) {
-    if (!settings.voice || !('speechSynthesis' in window)) return;
+    if (!settings.voice || asleep || !('speechSynthesis' in window)) return;
     speechSynthesis.cancel(); // always say the newest thing, never a backlog
     const u = new SpeechSynthesisUtterance(text);
     if (voice) u.voice = voice;
-    u.rate = 0.9; u.pitch = 1.3;
+    u.rate = 0.9; u.pitch = 1.3; u.volume = vol;
     speechSynthesis.speak(u);
   }
 
@@ -375,7 +382,7 @@
   // Memory matters here (iOS Safari kills pages that use too much canvas), so: one master per look, glyph
   // masters cropped to the glyph, bubble bodies without the rim (that is one live stroke), clouds at half size.
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
-  const TEXT_FONT = '"Arial Rounded MT Bold","Trebuchet MS",sans-serif';
+  const TEXT_FONT = '"Kids Rounded","Arial Rounded MT Bold","Trebuchet MS",sans-serif';
   const HUES = 12, CLOUD_RES = 0.5;
   const bodySprites = new Map(), itemSprites = new Map();
   let cloudSprites = [];
@@ -761,7 +768,16 @@
   };
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
 
+  // The shared grown-up timer eases the sound down at bedtime and stops it at goodnight
+  if (window.KidsGrownup) KidsGrownup.register({
+    setVolume(v) { vol = v; asleep = false; if (out) out.gain.setTargetAtTime(v, actx.currentTime, 0.3); },
+    pause() { asleep = true; down.clear(); if ('speechSynthesis' in window) speechSynthesis.cancel(); if (actx) actx.suspend(); },
+  });
+
   resize(); // sizes the canvas and queues the sprites
+  // Canvas text doesn't wait for web fonts, so the letter and number sprites are built again once the font is in.
+  // Nothing waits on this: the game plays at once with the fallback font and swaps in a moment later.
+  if (document.fonts && document.fonts.load) document.fonts.load('900 64px "Kids Rounded"').then(() => buildSprites(), () => {});
   // start with the sky already full
   for (let i = 0, n = maxBubbles(); i < n; i++) spawnBubble(undefined, H * (0.1 + 0.9 * (i + Math.random()) / n), { giant: false });
   newTarget();

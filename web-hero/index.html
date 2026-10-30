@@ -11,7 +11,9 @@
 <meta name="apple-mobile-web-app-title" content="Web Hero">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#8fd3ff">
+<link rel="preload" href="../shared/KidsRounded.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  @font-face { font-family: "Kids Rounded"; src: url("../shared/KidsRounded.woff2") format("woff2"); font-weight: 100 900; font-display: block; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   body { background: linear-gradient(180deg, #8fd3ff 0%, #d5ecff 60%, #ffe2cf 100%); }
@@ -27,7 +29,7 @@
   #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; overflow-y: auto; padding: 16px 0; }
   #panel.open { display: flex; }
   .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); margin: auto; }
-  .card h2 { margin: 0 0 4px; }
+  .card h2 { margin: 0 0 4px; font-family: "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; }
   .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
   .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
   .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -37,6 +39,7 @@
   .toggles button.off { opacity: .45; }
   .done { width: 100%; margin-top: 16px; background: #ff8a1f; color: #fff; }
 </style>
+<link rel="stylesheet" href="../shared/grownup.css">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -65,11 +68,13 @@
       <button id="tFull">⛶ Full screen</button>
       <button id="tNext">⏭️ Next level</button>
     </div>
+    <div data-kg-panel></div>
     <button class="done" id="done">Let's play!</button>
   </div>
 </div>
 
 <script src="matter.min.js"></script>
+<script src="../shared/grownup.js"></script>
 <script>
 (() => {
   const { Engine, Bodies, Body, Composite, Events, Sleeping, Constraint, Query } = Matter;
@@ -83,11 +88,12 @@
 
   // ---------- Audio: everything is made right here, no sound files ----------
   let actx = null, master = null, noiseBuf = null;
+  let vol = 1, asleep = false; // vol: the grown-up timer's wind-down multiplier; asleep: goodnight, so nothing makes a sound
   function audio() {
     if (!actx) {
       try {
         actx = new (window.AudioContext || window.webkitAudioContext)();
-        master = actx.createGain(); master.gain.value = 0.8;
+        master = actx.createGain(); master.gain.value = 0.8 * vol;
         // limiter: a pile-up of crash sounds squeezes down instead of clipping
         const lim = actx.createDynamicsCompressor();
         lim.threshold.value = -12; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25;
@@ -96,7 +102,7 @@
         const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
       } catch (e) {}
     }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (actx && actx.state === 'suspended' && !asleep) actx.resume();
     return actx;
   }
   const snd = () => settings.sound && audio();
@@ -849,7 +855,7 @@
 
     // what's left: one little icon per vehicle in this level, under the star counter, ticked off as they fall
     const bh = Math.min(74, Math.max(46, u * 1.2)), bx = 12 + inset('--sal'), by = 10 + inset('--sat'), sz = bh * 0.72;
-    const vs = Math.min(40, Math.max(24, u * 0.7)), numFont = `900 ${bh * 0.62}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
+    const vs = Math.min(40, Math.max(24, u * 0.7)), numFont = `900 ${bh * 0.62}px "Kids Rounded","Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
     if (vehicles.length) {
       const s = vs, gap = s * 0.25;
       let x = bx + 4; const y = by + bh + 8 + s / 2;
@@ -941,6 +947,12 @@
   };
   document.getElementById('tNext').onclick = () => { nextLevel(); panel.classList.remove('open'); audio(); };
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
+
+  // The shared grown-up timer eases the sound down at bedtime and stops it at goodnight
+  if (window.KidsGrownup) KidsGrownup.register({
+    setVolume(v) { vol = v; asleep = false; if (master) master.gain.setTargetAtTime(0.8 * v, actx.currentTime, 0.3); },
+    pause() { asleep = true; aim = null; if (actx) actx.suspend(); },
+  });
 
   resize();
   requestAnimationFrame(loop);
