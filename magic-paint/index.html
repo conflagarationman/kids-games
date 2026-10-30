@@ -177,9 +177,19 @@
   const unit = () => Math.min(W, H);
 
   // ---------- Audio ----------
-  let actx = null;
+  let actx = null, master = null;
   function audio() {
-    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (!actx) {
+      try {
+        actx = new (window.AudioContext || window.webkitAudioContext)();
+        // everything goes through one limiter, so a pile of taps can't clip. The compressor adds about 5.4 dB of makeup gain on its own,
+        // which the master gain takes back off, so a single sound is as loud as it was before the limiter
+        master = actx.createGain(); master.gain.value = 0.54;
+        const lim = actx.createDynamicsCompressor();
+        lim.threshold.value = -12; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25;
+        master.connect(lim); lim.connect(actx.destination);
+      } catch (e) {}
+    }
     if (actx && actx.state === 'suspended') actx.resume();
     return actx;
   }
@@ -192,7 +202,7 @@
     g.gain.setValueAtTime(0.0001, start);
     g.gain.exponentialRampToValueAtTime(vol, start + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-    o.connect(g).connect(a.destination); o.start(start); o.stop(start + dur + 0.02);
+    o.connect(g).connect(master); o.start(start); o.stop(start + dur + 0.02);
   }
   // higher on the screen = higher note
   function brushNote(y) {
@@ -206,7 +216,7 @@
     const o = actx.createOscillator(), g = actx.createGain();
     o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(660, t + 0.09);
     g.gain.setValueAtTime(0.22, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
-    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.16);
+    o.connect(g).connect(master); o.start(t); o.stop(t + 0.16);
     tone(pick(NOTES), t + 0.06, 0.4, 'triangle', 0.12);
   }
   function whooshSound() {
