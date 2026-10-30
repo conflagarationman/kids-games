@@ -19,6 +19,10 @@
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   body { background: linear-gradient(180deg, #8fd8ff 0%, #c9b8ff 60%, #ffc6e5 100%); }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  /* the sky: two CSS layers crossfade between level themes, so the canvas never pays for a full-screen background */
+  .sky { position: fixed; inset: 0; pointer-events: none; }
+  #skyA { background: linear-gradient(180deg, #8fd8ff 0%, #c9b8ff 60%, #ffc6e5 100%); }
+  #skyB { opacity: 0; }
 
   /* Parent button: small, faded, needs a long press so little fingers don't open it */
   #parentBtn { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 3; touch-action: none; }
@@ -37,11 +41,13 @@
   .modes button.on { border-color: #38c6f4; background: #e3f7ff; }
   .toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .toggles button.off { opacity: .45; }
+  .toggles button.on { border-color: #38c6f4; background: #e3f7ff; }
   .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
 </style>
 <link rel="stylesheet" href="../shared/grownup.css">
 </head>
 <body>
+<div class="sky" id="skyA"></div><div class="sky" id="skyB"></div>
 <canvas id="c"></canvas>
 
 <button id="parentBtn" aria-label="Grown-up settings (press and hold)">⚙️<span class="ring"></span></button>
@@ -75,6 +81,16 @@
       <button data-speed="0.6">🐢 Slow</button>
       <button data-speed="1">🐇 Normal</button>
       <button data-speed="1.7" style="grid-column: span 2">🚀 Super fast</button>
+    </div>
+    <div class="label">Levels</div>
+    <div class="toggles">
+      <button id="tLevels" style="grid-column: span 3">🏆 Levels and boss bubbles</button>
+    </div>
+    <div class="label">Taps to pop a boss</div>
+    <div class="toggles">
+      <button data-boss="8">8</button>
+      <button data-boss="12">12</button>
+      <button data-boss="20">20</button>
     </div>
     <div data-kg-panel></div>
     <button class="done" id="done">Let's play!</button>
@@ -125,7 +141,7 @@
 
   // ---------- Settings (only settings are saved) ----------
   const KEY = 'bubblePop.kids.v1';
-  let settings = { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false };
+  let settings = { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false, levels: true, bossTaps: 12 };
   try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
   const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
 
@@ -279,19 +295,20 @@
       addConfetti(b.x + (Math.random() - 0.5) * W * 0.4, b.y - Math.random() * H * 0.3, 120, 60);
     }
     const was = target; target = null;
-    setTimeout(() => { if (settings.find && !target) { target = was; newTarget(); } }, 1600);
+    setTimeout(() => { if (settings.find && !target && isPlaying()) { target = was; newTarget(); } }, 1600);
   }
 
   function popBubble(i) {
     const b = bubbles.splice(i, 1)[0];
     popCount++;
     popSound();
-    const isTarget = settings.find && target && b.item.id === target.id;
+    const live = isPlaying(); // while a boss is up or a break is on, leftovers just pop: no Find it, no level credit
+    const isTarget = live && settings.find && target && b.item.id === target.id;
     if (isTarget) foundIt(b);
     else {
       say(b.item.say);
       // after a few misses, ask again and make the right ones shimmer
-      if (settings.find && target && ++wrongRun >= 3) { wrongRun = 0; hintGlow = 1; setTimeout(ask, 900); }
+      if (live && settings.find && target && ++wrongRun >= 3) { wrongRun = 0; hintGlow = 1; setTimeout(ask, 900); }
     }
     const n = 18;
     for (let k = 0; k < n; k++) {
@@ -301,16 +318,17 @@
         t: 0, life: 0.6, r: 3 + Math.random() * 5, hue: (b.hue + k * 20) % 360 });
     }
     reveals.push({ x: b.x, y: b.y, r: b.r, item: b.item, t: 0 });
-    if (b.giant) {
+    if (b.giant && live) {
       // a giant bubble bursts into four little bubbles that scatter
       for (let k = 0; k < 4; k++) {
         const a = -Math.PI / 2 + (k - 1.5) * 0.9, sp = unit() * 0.5;
         spawnBubble(b.x, b.y, { giant: false, r: baseR() * 0.7, vx: Math.cos(a) * sp, vy: -H * RISE[1] * 1.2 });
       }
     }
-    if (!settings.find && popCount % 12 === 0) celebrate();
+    if (settings.levels) { if (live && (!settings.find || isTarget)) levelPop(); } // the boss pop is the celebration
+    else if (!settings.find && popCount % 12 === 0) celebrate();
     // keep the screen lively: a fresh bubble arrives soon after each pop
-    setTimeout(() => { if (bubbles.length < maxBubbles()) spawnBubble(); }, 400);
+    setTimeout(() => { if (isPlaying() && bubbles.length < maxBubbles()) spawnBubble(); }, 400);
   }
 
   function celebrate() {
@@ -321,6 +339,379 @@
         addConfetti(Math.random() * W, -20 - Math.random() * H * 0.5, 60, 120);
       }
     }, 900);
+  }
+
+  // ---------- Levels and bosses ----------
+  // Play (each pop fills a pip) -> boss (hit it until it pops, it never leaves) -> a short break with a star.
+  // Levels change the scene, not the difficulty. Nothing here can be failed or lost.
+  const QUICK = /[?&]debug/.test(location.search) && /[?&]quick/.test(location.search); // ?debug&quick: 3 pops a level, 3 hits a boss
+  const THEMES = ['day', 'sunset', 'underwater', 'dusk'];
+  const SKY = [
+    'linear-gradient(180deg, #8fd8ff 0%, #c9b8ff 60%, #ffc6e5 100%)',
+    'linear-gradient(180deg, #ffe3b8 0%, #ffb9b3 50%, #f7a6d2 100%)',
+    'linear-gradient(180deg, #c9f6f1 0%, #8fdcea 55%, #6fbfe6 100%)',
+    'linear-gradient(180deg, #cdbfff 0%, #b2a4f0 55%, #e3b6ec 100%)',
+  ];
+  const BREAK = 5, HIT_GAP = 120; // seconds of break; ms between hits from one finger
+  const lv = { level: 1, phase: 'play', pops: 0, stars: 0, t: 0, pipT: 9, look: null, themed: false, starFx: false };
+  let boss = null, card = null;
+  const lastHit = new Map(), inBoss = new Map(); // by pointerId
+  const STAR = { kind: 'shape', shape: 'Star', color: '#ffc21a' }, HAND = { kind: 'emoji', glyph: '👆' };
+  const popsNeeded = () => QUICK ? 3 : settings.find ? 5 : 15;
+  const bossNeed = () => QUICK ? 3 : settings.bossTaps;
+  const isPlaying = () => !settings.levels || lv.phase === 'play';
+  const themeOf = level => (level - 1) % THEMES.length;
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+  const backOut = p => 1 + 2.2 * (p - 1) ** 3 + 1.2 * (p - 1) ** 2;
+
+  // two CSS layers: the new sky fades in over the old one, then the old one takes its place
+  const skyA = document.getElementById('skyA'), skyB = document.getElementById('skyB');
+  const skyW = [1, 0, 0, 0]; // how much of each theme's extras (clouds, rays, twinkles) to draw, eased over 1s
+  let theme = 0, fadeTimer = 0;
+  function setTheme(i, instant) {
+    if (i === theme && !instant) return;
+    clearTimeout(fadeTimer);
+    skyA.style.background = SKY[theme]; skyB.style.transition = 'none'; skyB.style.opacity = '0'; // settle a fade still running
+    theme = i;
+    if (instant) { skyA.style.background = SKY[i]; skyW.fill(0); skyW[i] = 1; return; }
+    skyB.style.background = SKY[i]; void skyB.offsetWidth;
+    skyB.style.transition = 'opacity 1s ease'; skyB.style.opacity = '1';
+    fadeTimer = setTimeout(() => { skyA.style.background = SKY[i]; skyB.style.transition = 'none'; skyB.style.opacity = '0'; }, 1050);
+  }
+
+  function levelPop() {
+    lv.pops++; lv.pipT = 0;
+    if (lv.pops >= popsNeeded()) startBoss();
+  }
+  // a fresh stream of bubbles from below, for when play starts again
+  function streamIn() {
+    const n = Math.ceil(maxBubbles() * 0.6);
+    for (let i = 0; i < n; i++) spawnBubble(undefined, H + baseR() + (i / n) * H * 0.35, { giant: false });
+    spawnT = 0;
+  }
+  // changing the mode or the levels setting mid-level starts the level over (a break that was on counts as done)
+  function resetLevel() {
+    const wasBreak = lv.phase === 'break';
+    boss = null; card = null; lv.phase = 'play'; lv.pops = 0; lv.t = 0; lv.themed = false;
+    if (wasBreak) lv.level++;
+    inBoss.clear();
+    for (const b of bubbles) b.leave = false;
+    if (settings.levels) setTheme(themeOf(lv.level)); else setTheme(0, true); // levels off is today's plain day sky
+    if (bubbles.length < maxBubbles() * 0.5) streamIn();
+  }
+
+  // ---- the boss ----
+  const bossR = () => unit() * 0.225; // about 0.45 of the short side across
+  const bossUp = () => boss && lv.phase === 'boss';
+  function bossPos() {
+    const R = bossR(), cy = Math.max(H * 0.42, SAT + 46 + R * 1.55); // clear of the pips, whatever the shape of the screen
+    const p = clamp01((boss.t - 0.4) / 1.5), from = H + R * 1.9;
+    return { x: W / 2, y: from + (cy - from) * backOut(p) + Math.sin(boss.t * 1.7) * R * 0.045 };
+  }
+  function overBoss(x, y) {
+    const c = bossPos(), r = bossR() * 1.2 + 16; // the hit zone is a little bigger than the boss
+    return (x - c.x) ** 2 + (y - c.y) ** 2 <= r * r;
+  }
+  function startBoss() {
+    lv.phase = 'boss'; lv.t = 0;
+    for (const b of bubbles) b.leave = true; // the rest drift up and away
+    const look = lv.level % 2 ? 'crown' : 'creature';
+    boss = { look, t: 0, hits: 0, sqT: 9, idle: 0, shown: 0, hue: look === 'crown' ? (Math.random() * 360) | 0 : pick([150, 285, 20, 200]),
+      item: look === 'crown' ? makeItem(settings.mode) : null, cracks: look === 'crown' ? makeCracks() : [], sp: null };
+    lv.look = look;
+    buildBossSprite();
+  }
+  // crack lines in units of the boss radius, from the rim inward or from the middle outward; shuffled so
+  // they spread around the bubble as hits land
+  function makeCracks() {
+    const out = [], N = 20;
+    for (let k = 0; k < N; k++) {
+      const inner = k % 4 === 3, len = inner ? 0.3 + Math.random() * 0.35 : 0.35 + Math.random() * 0.45;
+      let ang = (k + Math.random() * 0.6) / N * Math.PI * 2, r = inner ? 0.12 + Math.random() * 0.2 : 0.98;
+      const pts = [];
+      for (let s = 0; s <= 4; s++) { pts.push([Math.cos(ang) * r, Math.sin(ang) * r]); r += (inner ? 1 : -1) * len / 4; ang += (Math.random() - 0.5) * 0.35; }
+      out.push({ pts, born: 0 });
+    }
+    return out.sort(() => Math.random() - 0.5);
+  }
+  function bossHit(id, x, y) {
+    const now = performance.now();
+    if (now - (lastHit.get(id) || 0) < HIT_GAP) return; // a jittery finger can't burst it at once
+    lastHit.set(id, now);
+    boss.hits++; boss.idle = 0; boss.sqT = 0;
+    const need = bossNeed(), prog = Math.min(1, boss.hits / need);
+    bossSound(prog);
+    for (let k = 0; k < 6; k++) {
+      const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 120;
+      particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, life: 0.5, r: 2 + Math.random() * 3, hue: (Math.random() * 360) | 0, star: true });
+    }
+    if (boss.hits >= need) { popBoss(); return; }
+    for (let i = boss.shown, n = Math.ceil(prog * boss.cracks.length); i < n; i++) boss.cracks[i].born = boss.t;
+    boss.shown = Math.ceil(prog * boss.cracks.length);
+  }
+  function bossSound(prog) {
+    if (!settings.sound || !audio()) return;
+    const t = actx.currentTime, f = NOTES[Math.min(NOTES.length - 1, Math.floor(prog * NOTES.length))]; // climbs the scale as it cracks
+    if (boss.look === 'crown') { tone(f, t, 0.4, 'triangle', 0.16); tone(f * 2, t, 0.15, 'sine', 0.05); return; }
+    for (let i = 0; i < 4; i++) { // a giggle: quick blips that wobble in pitch
+      const s = t + i * 0.065, o = actx.createOscillator(), g = actx.createGain(), fr = f * (i % 2 ? 1.12 : 0.95);
+      o.type = 'sine'; o.frequency.setValueAtTime(fr, s); o.frequency.linearRampToValueAtTime(fr * 1.18, s + 0.05);
+      g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.13, s + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.06);
+      o.connect(g).connect(out); o.start(s); o.stop(s + 0.08);
+    }
+  }
+  function popBoss() {
+    const c = bossPos(), R = bossR();
+    popSound(); cheerSound();
+    say(pick(['Hooray!', 'Yay! Great popping!', 'Wow! You did it!', 'Super popper!']));
+    for (let k = 0; k < 40; k++) {
+      const a = (k / 40) * Math.PI * 2, sp = unit() * (0.3 + Math.random() * 0.5);
+      particles.push({ x: c.x + Math.cos(a) * R * 0.9, y: c.y + Math.sin(a) * R * 0.9, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, life: 0.8, r: 3 + Math.random() * 6, hue: (boss.hue + k * 15) % 360 });
+    }
+    for (let k = 0; k < 10; k++) { // the shower of minis, same as a giant's
+      const a = -Math.PI / 2 + (k - 4.5) * 0.3, sp = unit() * (0.35 + Math.random() * 0.4);
+      spawnBubble(c.x, c.y, { giant: false, r: baseR() * 0.7, vx: Math.cos(a) * sp, vy: -H * RISE[1] * (1 + Math.random() * 0.8) });
+    }
+    for (let k = 0; k < 170; k++) addConfetti(c.x + (Math.random() - 0.5) * W * 0.8, c.y - Math.random() * H * 0.5, 140, 60);
+    if (boss.item && boss.item.kind !== 'color') reveals.push({ x: c.x, y: c.y, r: R, item: boss.item, t: 0 });
+    boss = null; lv.phase = 'break'; lv.t = 0; lv.stars++; lv.themed = false; lv.starFx = false; card = null;
+    inBoss.clear();
+  }
+
+  // ---- the break ----
+  function updateLevels(dt, ldt) {
+    for (let i = 0; i < skyW.length; i++) skyW[i] += Math.max(-dt, Math.min(dt, (i === theme ? 1 : 0) - skyW[i]));
+    if (!settings.levels) return;
+    lv.pipT += ldt;
+    if (bossUp()) { boss.t += ldt; boss.idle += ldt; boss.sqT += ldt; lv.t += ldt; }
+    else if (lv.phase === 'break') {
+      lv.t += ldt;
+      if (!lv.starFx && lv.t >= 0.75) starFx();
+      if (!lv.themed && lv.t >= BREAK - 0.6) { lv.themed = true; setTheme(themeOf(lv.level + 1)); } // the sky changes as the card leaves
+      if (lv.t >= BREAK) {
+        lv.level++; lv.phase = 'play'; lv.pops = 0; lv.t = 0; card = null;
+        streamIn();
+        if (settings.find) { target = null; newTarget(); }
+      }
+    }
+  }
+  function cardLayout() {
+    const n = Math.max(1, lv.stars), cw = Math.min(W * 0.88, Math.max(250, unit() * 0.78), 500);
+    const perRow = n <= 6 ? n : n <= 12 ? 6 : 8, rows = Math.ceil(n / perRow);
+    const ss = Math.min(cw * 0.15, cw * 0.86 / (perRow * 1.25)), titleS = cw * 0.2, pad = cw * 0.08;
+    return { n, cw, perRow, rows, ss, titleS, pad, ch: pad * 2 + titleS * 1.15 + rows * ss * 1.35 };
+  }
+  function starPos(L, i, cx, cy) {
+    const r = (i / L.perRow) | 0, inRow = Math.min(L.perRow, L.n - r * L.perRow), c = i % L.perRow;
+    return { x: cx + (c - (inRow - 1) / 2) * L.ss * 1.25, y: cy - L.ch / 2 + L.pad + L.titleS * 1.15 + (r + 0.5) * L.ss * 1.35 };
+  }
+  // the newest star arrives with a sparkle and a little chime
+  function starFx() {
+    lv.starFx = true;
+    const L = cardLayout(), p = starPos(L, L.n - 1, W / 2, H / 2);
+    if (settings.sound && audio()) { const t = actx.currentTime; tone(NOTES[4], t, 0.4, 'triangle', 0.14); tone(NOTES[6], t + 0.1, 0.5, 'triangle', 0.12); }
+    for (let k = 0; k < 16; k++) {
+      const a = Math.random() * Math.PI * 2, sp = 80 + Math.random() * 140;
+      particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, life: 0.7, r: 3 + Math.random() * 4, hue: 45 + Math.random() * 20, star: true });
+    }
+  }
+  function buildCard() {
+    const L = cardLayout(), sp = makeSprite(L.cw + 60, L.ch + 60), g = sp.g, x = (sp.w - L.cw) / 2, y = (sp.h - L.ch) / 2, rad = L.cw * 0.12;
+    const gr = g.createLinearGradient(0, y, 0, y + L.ch); gr.addColorStop(0, '#ffffff'); gr.addColorStop(1, '#f1ebff');
+    g.shadowColor = 'rgba(43,45,92,.28)'; g.shadowBlur = 22; g.shadowOffsetY = 8;
+    g.beginPath(); g.roundRect(x, y, L.cw, L.ch, rad); g.fillStyle = gr; g.fill();
+    g.shadowColor = 'transparent';
+    g.lineWidth = 5; g.strokeStyle = '#ffd5ee'; g.stroke();
+    card = { sp, L };
+  }
+  function drawCard() {
+    if (lv.phase !== 'break') return;
+    if (!card) buildCard();
+    const { sp, L } = card, t = lv.t, away = H / 2 + L.ch;
+    const into = clamp01((t - 0.15) / 0.55), out = clamp01((t - (BREAK - 0.6)) / 0.6);
+    const cx = W / 2, cy = H / 2 - (1 - backOut(into)) * away - out * out * away;
+    if (into <= 0) return;
+    ctx.drawImage(sp.c, cx - sp.w / 2, cy - sp.h / 2, sp.w, sp.h);
+    ctx.font = `900 ${L.titleS}px ${TEXT_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#2b2d5c'; ctx.fillText(`Level ${lv.level}`, cx, cy - L.ch / 2 + L.pad + L.titleS * 0.55);
+    for (let i = 0; i < L.n; i++) {
+      const p = starPos(L, i, cx, cy);
+      let k = 1;
+      if (i === L.n - 1) { if (t < 0.75) continue; k = backOut(clamp01((t - 0.75) / 0.4)); } // the new one pops in
+      drawItem(STAR, p.x, p.y, L.ss * k, 1);
+    }
+  }
+
+  // ---- boss looks ----
+  // Static parts are painted once per boss into one master sprite (bubble, crown, content sticker, creature body);
+  // cracks, eyes, mouth and sheen are drawn live over it.
+  const BOSS_BOX = { crown: { l: 1.15, t: 1.7, w: 2.3, h: 2.85 }, creature: { l: 1.45, t: 1.45, w: 2.9, h: 2.7 } };
+  function buildBossSprite() {
+    if (!boss) return;
+    const R = bossR(), box = BOSS_BOX[boss.look], sp = makeSprite(box.w * R, box.h * R), ox = box.l * R, oy = box.t * R;
+    if (boss.look === 'crown') paintCrownBoss(sp.g, R, ox, oy); else paintCreatureBoss(sp.g, R, ox, oy);
+    boss.sp = { c: sp.c, w: sp.w, h: sp.h, ox, oy };
+  }
+  // a one-off version of the shared sticker look, at the boss's size (the glyph masters are too small for this)
+  function stickerOnto(g, item, x, y, S) {
+    const [hw, hh] = glyphExtent(item, S), pad = S * 0.2, w = 2 * (hw + pad), h = 2 * (hh + pad);
+    const A = makeSprite(w, h), B = makeSprite(w, h), C = makeSprite(w, h), pw = A.c.width, ph = A.c.height;
+    paintGlyph(A.g, item, A.w / 2, A.h / 2, S);
+    B.g.drawImage(A.c, 0, 0, pw, ph, 0, 0, A.w, A.h);
+    B.g.globalCompositeOperation = 'source-in'; B.g.fillStyle = '#fff'; B.g.fillRect(0, 0, A.w, A.h);
+    const o = Math.max(2, S * 0.06);
+    for (let k = 0; k < STAMPS; k++) {
+      const a = k / STAMPS * Math.PI * 2;
+      C.g.drawImage(B.c, 0, 0, pw, ph, Math.round(Math.cos(a) * o * DPR) / DPR, Math.round(Math.sin(a) * o * DPR) / DPR, A.w, A.h);
+    }
+    g.save();
+    g.shadowColor = 'rgba(43,45,92,.25)'; g.shadowOffsetY = S * 0.03 * DPR; g.shadowBlur = S * 0.04 * DPR;
+    g.drawImage(C.c, 0, 0, pw, ph, x - A.w / 2, y - A.h / 2, A.w, A.h);
+    g.restore();
+    g.drawImage(A.c, 0, 0, pw, ph, x - A.w / 2, y - A.h / 2, A.w, A.h);
+  }
+  function paintCrownBoss(g, R, ox, oy) {
+    const item = boss.item, tint = item.kind === 'color' ? item.color : null;
+    paintBody(g, ox, oy, R, tint, boss.hue, false);
+    g.lineWidth = Math.max(4, R * 0.035); g.strokeStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(ox, oy, R, 0, 7); g.stroke();
+    g.lineWidth = Math.max(2, R * 0.02); g.strokeStyle = 'rgba(255,255,255,.45)'; g.beginPath(); g.arc(ox, oy, R * 0.82, 0.2 * Math.PI, 0.5 * Math.PI); g.stroke();
+    if (item.kind !== 'color') stickerOnto(g, item, ox, oy + R * 0.1, R * 0.95);
+    g.fillStyle = 'rgba(255,255,255,.9)';
+    g.beginPath(); g.ellipse(ox - R * 0.45, oy - R * 0.5, R * 0.22, R * 0.11, -0.7, 0, 7); g.fill();
+    g.beginPath(); g.arc(ox - R * 0.64, oy - R * 0.2, R * 0.035, 0, 7); g.fill();
+    // the crown: gold with a white outline and soft shadow, like the stickers
+    const P = (x, y) => [ox + x * R, oy + y * R];
+    g.save();
+    g.beginPath(); g.moveTo(...P(-0.52, -0.72)); g.lineTo(...P(-0.58, -1.26)); g.lineTo(...P(-0.28, -1.02)); g.lineTo(...P(0, -1.42));
+    g.lineTo(...P(0.28, -1.02)); g.lineTo(...P(0.58, -1.26)); g.lineTo(...P(0.52, -0.72)); g.quadraticCurveTo(...P(0, -0.6), ...P(-0.52, -0.72)); g.closePath();
+    g.shadowColor = 'rgba(43,45,92,.3)'; g.shadowBlur = R * 0.06; g.shadowOffsetY = R * 0.03;
+    g.lineJoin = 'round'; g.lineWidth = R * 0.085; g.strokeStyle = '#fff'; g.stroke();
+    g.shadowColor = 'transparent';
+    const gr = g.createLinearGradient(0, oy - R * 1.42, 0, oy - R * 0.7); gr.addColorStop(0, '#ffe98a'); gr.addColorStop(1, '#ffb21a');
+    g.fillStyle = gr; g.fill();
+    g.lineWidth = R * 0.02; g.strokeStyle = '#e8920b'; g.stroke();
+    g.restore();
+    g.lineWidth = R * 0.03; g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.65)';
+    g.beginPath(); g.moveTo(...P(-0.5, -0.8)); g.quadraticCurveTo(...P(0, -0.7), ...P(0.5, -0.8)); g.stroke();
+    for (const [x, y] of [[-0.58, -1.28], [0, -1.44], [0.58, -1.28]]) { // pearls on the tips
+      g.beginPath(); g.arc(...P(x, y), R * 0.075, 0, 7); g.fillStyle = '#fff6cf'; g.fill(); g.lineWidth = R * 0.02; g.strokeStyle = '#e8920b'; g.stroke();
+    }
+    [[-0.27, '#ff3b3b'], [0, '#2f7bff'], [0.27, '#ff4fb0']].forEach(([x, c]) => { // jewels
+      g.beginPath(); g.arc(...P(x, -0.9), R * 0.07, 0, 7); g.fillStyle = c; g.fill(); g.lineWidth = R * 0.015; g.strokeStyle = '#fff'; g.stroke();
+      g.beginPath(); g.arc(...P(x - 0.02, -0.92), R * 0.02, 0, 7); g.fillStyle = 'rgba(255,255,255,.9)'; g.fill();
+    });
+  }
+  function paintCreatureBoss(g, R, ox, oy) {
+    const h = boss.hue;
+    // a translucent pastel blob: same idea as the bubbles, a little more solid so the face reads
+    const blob = (x, y, rx, ry, rot = 0) => {
+      const gr = g.createRadialGradient(ox + x - rx * 0.3, oy + y - ry * 0.3, Math.min(rx, ry) * 0.1, ox + x, oy + y, Math.max(rx, ry));
+      gr.addColorStop(0, `hsla(${h},90%,96%,.85)`); gr.addColorStop(0.7, `hsla(${h},85%,84%,.65)`); gr.addColorStop(1, `hsla(${h + 30},90%,76%,.92)`);
+      g.beginPath(); g.ellipse(ox + x, oy + y, rx, ry, rot, 0, 7); g.fillStyle = gr; g.fill();
+      g.lineWidth = Math.max(3, R * 0.03); g.strokeStyle = 'rgba(255,255,255,.88)'; g.stroke();
+    };
+    blob(-0.42 * R, 0.98 * R, 0.27 * R, 0.16 * R); blob(0.42 * R, 0.98 * R, 0.27 * R, 0.16 * R); // stubby feet
+    blob(-1.03 * R, 0.15 * R, 0.27 * R, 0.18 * R, 0.6); blob(1.03 * R, 0.15 * R, 0.27 * R, 0.18 * R, -0.6); // stubby arms
+    blob(-0.2 * R, -1.0 * R, 0.17 * R, 0.17 * R); blob(0.1 * R, -1.15 * R, 0.21 * R, 0.21 * R); blob(0.38 * R, -0.98 * R, 0.13 * R, 0.13 * R); // a tuft of little bubbles
+    blob(0, 0.05 * R, R, 0.97 * R);
+    g.fillStyle = 'rgba(255,255,255,.9)';
+    g.beginPath(); g.ellipse(ox - R * 0.5, oy - R * 0.62, R * 0.2, R * 0.1, -0.7, 0, 7); g.fill();
+    g.beginPath(); g.arc(ox - R * 0.7, oy - R * 0.38, R * 0.035, 0, 7); g.fill();
+  }
+
+  function sparkle4(x, y, s) {
+    ctx.beginPath(); ctx.moveTo(x, y - s); ctx.quadraticCurveTo(x, y, x + s, y); ctx.quadraticCurveTo(x, y, x, y + s);
+    ctx.quadraticCurveTo(x, y, x - s, y); ctx.quadraticCurveTo(x, y, x, y - s); ctx.fill();
+  }
+  function drawBoss() {
+    if (!boss || !boss.sp) return;
+    const R = bossR(), c = bossPos(), sp = boss.sp, prog = Math.min(1, boss.hits / bossNeed()), t = boss.t;
+    const sq = boss.sqT < 1.2 ? Math.exp(-boss.sqT * 7) * Math.cos(boss.sqT * 22) * 0.2 : 0; // squish: flat first, then springs back
+    const shake = prog > 0.6 ? (prog - 0.6) * R * 0.05 : 0; // trembles when it is close to popping
+    ctx.save();
+    ctx.translate(c.x + Math.sin(t * 70) * shake, c.y);
+    ctx.rotate(Math.sin(t * 1.2) * 0.045);
+    ctx.scale(1 + sq * 0.8, 1 - sq);
+    ctx.drawImage(sp.c, -sp.ox, -sp.oy, sp.w, sp.h);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (boss.look === 'crown') {
+      // sheen sliding around the rim
+      ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = R * 0.05;
+      ctx.beginPath(); ctx.arc(0, 0, R * 0.9, t * 0.8, t * 0.8 + 0.5); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.beginPath(); ctx.arc(0, 0, R * 0.9, t * 0.8 + Math.PI, t * 0.8 + Math.PI + 0.25); ctx.stroke();
+      ctx.fillStyle = '#fff';
+      for (let k = 0; k < 3; k++) { // twinkles
+        const a = t * 0.5 + k * 2.1, s = R * 0.07 * (0.5 + 0.5 * Math.sin(t * 3 + k * 2));
+        sparkle4(Math.cos(a) * R * 0.97, Math.sin(a) * R * 0.97 + R * 0.05, s);
+      }
+      if (boss.shown) {
+        ctx.beginPath();
+        for (let i = 0; i < boss.shown; i++) {
+          const cr = boss.cracks[i], segs = clamp01((t - cr.born) / 0.18) * (cr.pts.length - 1);
+          ctx.moveTo(cr.pts[0][0] * R, cr.pts[0][1] * R);
+          for (let s = 1; s <= Math.ceil(segs); s++) {
+            const f = Math.min(1, segs - (s - 1)), p0 = cr.pts[s - 1], p1 = cr.pts[s];
+            ctx.lineTo((p0[0] + (p1[0] - p0[0]) * f) * R, (p0[1] + (p1[1] - p0[1]) * f) * R);
+          }
+        }
+        ctx.lineWidth = Math.max(4, R * 0.04); ctx.strokeStyle = 'rgba(43,45,92,.35)'; ctx.stroke();
+        ctx.lineWidth = Math.max(2, R * 0.02); ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.stroke();
+      }
+    } else drawFace(R, t, prog);
+    ctx.restore();
+  }
+  // the creature's face: googly eyes that go dizzy, cheeks that puff, a wobbly grin that opens on each hit
+  function drawFace(R, t, prog) {
+    const ink = '#2b2d5c', dizzy = prog >= 0.55;
+    ctx.fillStyle = 'rgba(255,111,160,.5)'; // cheeks
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * 0.58 * R, 0.3 * R, R * 0.15 * (1 + prog * 0.7), 0, 7); ctx.fill(); }
+    ctx.lineWidth = Math.max(2, R * 0.03);
+    for (const s of [-1, 1]) {
+      const ex = s * 0.33 * R, ey = -0.2 * R, er = 0.27 * R;
+      ctx.beginPath(); ctx.arc(ex, ey, er, 0, 7); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = ink; ctx.stroke();
+      if (dizzy) { // spirals instead of pupils
+        ctx.beginPath();
+        for (let i = 0; i <= 26; i++) { const k = i / 26, a = s * (t * 7) + k * 4.4 * Math.PI; ctx.lineTo(ex + Math.cos(a) * er * 0.78 * k, ey + Math.sin(a) * er * 0.78 * k); }
+        ctx.stroke();
+      } else { // googly pupils that slosh around, faster as it gets sillier
+        const a = t * (2 + prog * 6) + s * 1.7, o = R * 0.08 * (0.4 + prog);
+        ctx.beginPath(); ctx.arc(ex + Math.cos(a) * o, ey + Math.sin(a * 1.3) * o * 0.8 + R * 0.04, er * 0.42, 0, 7); ctx.fillStyle = ink; ctx.fill();
+      }
+    }
+    const w = Math.sin(t * 5) * 0.04, d = 0.16 + 0.14 * Math.exp(-boss.sqT * 3) + prog * 0.06 + w; // d: how deep the grin is
+    ctx.beginPath(); ctx.moveTo(-0.36 * R, 0.38 * R); ctx.quadraticCurveTo(0, (0.5 + w) * R, 0.36 * R, 0.38 * R);
+    ctx.quadraticCurveTo(0, (0.38 + 2 * d) * R, -0.36 * R, 0.38 * R); ctx.closePath();
+    ctx.fillStyle = '#8c2f5f'; ctx.fill(); ctx.strokeStyle = ink; ctx.stroke();
+    if (d > 0.2) { ctx.beginPath(); ctx.ellipse(0, (0.38 + d * 0.95) * R, 0.13 * R, d * 0.3 * R, 0, 0, 7); ctx.fillStyle = '#ff8aa8'; ctx.fill(); }
+    if (dizzy) { // little stars circling its head
+      ctx.fillStyle = '#ffd23f';
+      for (let k = 0; k < 3; k++) { const a = t * 3 + k * 2.1; sparkle4(Math.cos(a) * R * 0.6, -1.3 * R + Math.sin(a) * R * 0.1, R * 0.08); }
+    }
+  }
+  // a ghost finger taps the boss if nobody has for a while
+  function drawBossHint() {
+    if (!bossUp() || boss.idle < 8) return;
+    const R = bossR(), c = bossPos(), k = 0.5 + 0.5 * Math.sin(boss.t * 5), a = Math.min(1, (boss.idle - 8) / 0.5);
+    drawItem(HAND, c.x + R * 0.1, c.y + R * (0.7 - 0.25 * k), R * 0.55, 0.85 * a);
+  }
+
+  // progress row: one pip per pop, placed clear of the Find it badge and the top-right corner (the gear and the bedtime ring)
+  function drawPips(now) {
+    if (!settings.levels || lv.phase === 'break') return;
+    const n = popsNeeded(), narrow = !settings.find && W < 560;
+    const badgeB = 10 + SAT + Math.max(40, Math.min(64, unit() * 0.13)) * 1.35;
+    const avail = narrow ? W - 40 : W - 2 * 124, d = Math.max(9, Math.min(n <= 5 ? 24 : 18, avail / (n * 1.55))), step = d * 1.55;
+    const y = settings.find ? badgeB + 14 + d / 2 : narrow ? SAT + 70 : SAT + 32, x0 = W / 2 - (n - 1) * step / 2;
+    ctx.lineWidth = 2.5;
+    for (let i = 0; i < n; i++) {
+      const filled = i < lv.pops;
+      let k = 1;
+      if (lv.phase === 'boss') k = 1 + 0.1 * Math.sin(now / 200 + i * 0.6);
+      else if (filled && i === lv.pops - 1 && lv.pipT < 0.35) k = 1 + 0.7 * (1 - lv.pipT / 0.35);
+      ctx.beginPath(); ctx.arc(x0 + i * step, y, d / 2 * k, 0, 7);
+      ctx.fillStyle = filled ? BRIGHT[i % BRIGHT.length] : 'rgba(255,255,255,.4)'; ctx.fill();
+      ctx.strokeStyle = filled ? '#fff' : 'rgba(255,255,255,.8)'; ctx.stroke();
+    }
   }
 
   // ---------- Input: every finger counts, swiping pops too ----------
@@ -343,17 +734,31 @@
         const a = Math.random() * Math.PI * 2, sp = 40 + Math.random() * 90;
         particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, life: 0.5, r: 2 + Math.random() * 3, hue: (Math.random() * 360) | 0, star: true });
       }
-      if (bubbles.length < maxBubbles() + 2) spawnBubble(x, H + unit() * 0.15);
+      if (isPlaying() && bubbles.length < maxBubbles() + 2) spawnBubble(x, H + unit() * 0.15);
     }
   }
   let spoke = false; // iOS only lets the page talk after a touch, so the first question is asked again then
   cv.addEventListener('pointerdown', e => {
     e.preventDefault(); audio(); down.add(e.pointerId);
     if (!spoke) { spoke = true; if (settings.find && target) setTimeout(ask, 700); }
+    if (bossUp()) {
+      const inside = overBoss(e.clientX, e.clientY);
+      inBoss.set(e.pointerId, inside);
+      if (inside) { bossHit(e.pointerId, e.clientX, e.clientY); return; }
+    }
     touch(e.clientX, e.clientY, true);
   });
-  cv.addEventListener('pointermove', e => { if (down.has(e.pointerId)) touch(e.clientX, e.clientY, false); });
-  const lift = e => down.delete(e.pointerId);
+  cv.addEventListener('pointermove', e => {
+    if (!down.has(e.pointerId)) return;
+    if (bossUp()) {
+      // a swipe counts once each time the finger comes into the boss
+      const inside = overBoss(e.clientX, e.clientY), was = inBoss.get(e.pointerId);
+      inBoss.set(e.pointerId, inside);
+      if (inside) { if (!was) bossHit(e.pointerId, e.clientX, e.clientY); return; }
+    }
+    touch(e.clientX, e.clientY, false);
+  });
+  const lift = e => { down.delete(e.pointerId); inBoss.delete(e.pointerId); };
   addEventListener('pointerup', lift); addEventListener('pointercancel', lift);
   addEventListener('contextmenu', e => e.preventDefault());
   document.addEventListener('gesturestart', e => e.preventDefault()); // iOS pinch zoom
@@ -530,6 +935,7 @@
   }
   const warmItems = () => {
     const m = settings.mode, all = m === 'mix', out = [];
+    if (settings.levels) out.push(HAND, STAR); // the boss hint and the break card's stars
     if (all || m === 'animals') for (const a of ANIMALS) out.push({ kind: 'emoji', glyph: a[0] });
     if (all || m === 'letters') for (const l of LETTERS) out.push({ kind: 'text', glyph: l });
     if (all || m === 'numbers') for (let n = 1; n <= 10; n++) out.push({ kind: 'text', glyph: String(n) });
@@ -581,12 +987,12 @@
   // one opaque white cloud per master: drawn with globalAlpha, so overlapping lobes can't leave seams.
   // Half size is plenty for something this soft and a fifth of the memory.
   const CLOUD_BOX = { l: 1.1, t: 1.75, w: 4.4, h: 3 }; // in units of s, around the cloud's left-middle origin
-  function paintCloud(s) {
+  function paintCloud(s, color = '#fff') {
     const w = CLOUD_BOX.w * s, h = CLOUD_BOX.h * s, c = document.createElement('canvas');
     c.width = Math.ceil(w * CLOUD_RES); c.height = Math.ceil(h * CLOUD_RES);
     const g = c.getContext('2d'); g.scale(CLOUD_RES, CLOUD_RES);
     const ox = CLOUD_BOX.l * s, oy = CLOUD_BOX.t * s;
-    g.fillStyle = '#fff'; g.beginPath();
+    g.fillStyle = color; g.beginPath();
     g.arc(ox, oy, s, 0, 7); g.moveTo(ox + s * 2.35, oy - s * 0.45); g.arc(ox + s * 1.1, oy - s * 0.45, s * 1.25, 0, 7);
     g.moveTo(ox + s * 3.25, oy); g.arc(ox + s * 2.3, oy, s * 0.95, 0, 7);
     g.moveTo(ox + s * 2.7, oy + s * 0.25); g.ellipse(ox + s * 1.15, oy + s * 0.25, s * 1.55, s * 0.8, 0, 0, 7); // rounded base instead of a flat edge
@@ -597,6 +1003,9 @@
   // keep = true on a resize: the masters only change when their size or the pixel ratio does
   function buildSprites(keep) {
     cloudSprites = CLOUDS.map(c => paintCloud(unit() * 0.13 * c.s));
+    warmClouds = CLOUDS.map((c, i) => SUNSET_C.includes(i) ? paintCloud(unit() * 0.13 * c.s, '#fff1e8') : null);
+    raySprite = paintRays();
+    buildBossSprite(); card = null; // sized from the screen, so they follow a resize or rotation
     const rm = Math.ceil(baseR() * 1.25 * 1.04) + 1, sm = Math.min(76, Math.round(baseR() * 1.75));
     if (!keep || rm !== RM || sm !== SM || DPR !== spriteDPR) {
       bodySprites.clear(); itemSprites.clear(); urgent.clear(); warm.length = 0; queued.clear(); job = null; layers = null;
@@ -605,14 +1014,58 @@
     queueWarm();
   }
 
-  function drawClouds(now) {
-    ctx.globalAlpha = 0.45;
-    CLOUDS.forEach((c, i) => {
-      const sp = cloudSprites[i], s = unit() * 0.13 * c.s, span = W + s * 5;
+  function drawClouds(now, sprites, idx, alpha) {
+    ctx.globalAlpha = alpha;
+    for (const i of idx) {
+      const c = CLOUDS[i], sp = sprites[i], s = unit() * 0.13 * c.s, span = W + s * 5;
       const x = ((c.x + now / 1000 * c.v) % 1) * span - s * 2.5, y = c.y * H;
       ctx.drawImage(sp.c, x - sp.ox, y - sp.oy, sp.w, sp.h);
-    });
+    }
     ctx.globalAlpha = 1;
+  }
+
+  // ---- level themes: the gradient is CSS (see setTheme); what lives on top of it is drawn here ----
+  // day: today's clouds. sunset: a few warm ones. underwater: soft light rays and tiny drifting light bubbles. dusk: twinkles and two faint clouds. No moon anywhere:
+  // the bedtime timer uses a moon to mean "bedtime is coming".
+  const DAY_C = [0, 1, 2, 3, 4], SUNSET_C = [1, 2, 4], DUSK_C = [0, 3];
+  let warmClouds = [], raySprite = null;
+  const LIGHTS = Array.from({ length: 14 }, () => ({ x: Math.random(), v: 0.03 + Math.random() * 0.05, o: Math.random(), r: 0.5 + Math.random(), ph: Math.random() * 6 }));
+  const TWINKLES = Array.from({ length: 34 }, () => ({ x: Math.random(), y: Math.random() * 0.85, r: 1.1 + Math.random() * 1.6, sp: 0.8 + Math.random() * 1.6, ph: Math.random() * 6 }));
+  // soft beams from above, painted small (they are blurry anyway) and scaled up
+  function paintRays() {
+    const w = Math.ceil(W * 1.1 / 4), h = Math.ceil(H / 4), c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, h);
+    gr.addColorStop(0, 'rgba(255,255,255,.6)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr;
+    for (const [x, bw] of [[0.1, 0.07], [0.3, 0.05], [0.5, 0.09], [0.7, 0.06], [0.9, 0.08]]) {
+      const top = x * w, half = bw * w * 0.5, slant = h * 0.35;
+      g.beginPath(); g.moveTo(top - half, 0); g.lineTo(top + half, 0); g.lineTo(top + half * 2.2 - slant, h); g.lineTo(top - half * 2.2 - slant, h); g.closePath(); g.fill();
+    }
+    return c;
+  }
+  function drawSky(now) {
+    if (skyW[0] > 0.01) drawClouds(now, cloudSprites, DAY_C, 0.45 * skyW[0]);
+    if (skyW[1] > 0.01) drawClouds(now, warmClouds, SUNSET_C, 0.55 * skyW[1]);
+    if (skyW[2] > 0.01) {
+      ctx.globalAlpha = 0.8 * skyW[2];
+      ctx.drawImage(raySprite, -W * 0.05 + Math.sin(now / 4000) * W * 0.02, 0, W * 1.1, H);
+      ctx.globalAlpha = skyW[2]; ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,.55)';
+      for (const l of LIGHTS) { // tiny and faint, so they never look like bubbles to pop
+        const y = H * (1.05 - ((now / 1000 * l.v + l.o) % 1.1)), r = unit() * (0.006 + 0.008 * l.r);
+        ctx.beginPath(); ctx.arc((l.x + Math.sin(now / 1500 + l.ph) * 0.01) * W, y, r, 0, 7); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    if (skyW[3] > 0.01) {
+      drawClouds(now, cloudSprites, DUSK_C, 0.2 * skyW[3]);
+      for (const s of TWINKLES) {
+        const k = 0.5 + 0.5 * Math.sin(now / 1000 * s.sp + s.ph), a = (0.2 + 0.8 * k * k) * skyW[3];
+        ctx.fillStyle = `rgba(255,255,255,${a})`;
+        ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r * (0.7 + 0.5 * k), 0, 7); ctx.fill();
+        if (s.r > 2.2) { ctx.fillRect(s.x * W - s.r * 3 * k, s.y * H - 0.5, s.r * 6 * k, 1); ctx.fillRect(s.x * W - 0.5, s.y * H - s.r * 3 * k, 1, s.r * 6 * k); }
+      }
+    }
   }
 
   function drawBubble(b, now) {
@@ -636,11 +1089,12 @@
   let last = performance.now(), spawnT = 0;
   function update(dt) {
     const sp = settings.speed;
+    updateLevels(dt, asleep ? 0 : dt); // bedtime freezes the boss and break clocks
     // nobody's found it for a while: ask again and shimmer the right ones
-    if (settings.find && target && performance.now() - askedAt > 12000) { hintGlow = 1; ask(); }
+    if (settings.find && target && isPlaying() && performance.now() - askedAt > 12000) { hintGlow = 1; ask(); }
     spawnT -= dt;
     // the timer keeps a steady stream; the cap is only a ceiling for when lots of taps add extras
-    if (spawnT <= 0 && bubbles.length < maxBubbles() + 4) {
+    if (spawnT <= 0 && isPlaying() && bubbles.length < maxBubbles() + 4) {
       spawnBubble();
       // space arrivals so the screen stays about full: one trip's time shared across the bubbles
       const trip = 1 / ((RISE[0] + RISE[1]) / 2) / sp;
@@ -651,7 +1105,8 @@
       b.phase += dt * 1.5;
       b.x += (Math.sin(b.phase) * 20 + b.vx) * dt;
       b.vx *= 0.96; // the scatter from a giant pop slows to a drift
-      b.y += b.vy * sp * dt;
+      if (b.leave) { b.lvy = Math.min(H * 0.55, (b.lvy || Math.abs(b.vy * sp)) + H * dt); b.y -= b.lvy * dt; } // speeding away once a boss is coming
+      else b.y += b.vy * sp * dt;
       b.x = Math.max(b.r, Math.min(W - b.r, b.x));
       if (b.y < -b.r * 1.5) bubbles.splice(i, 1);
     }
@@ -673,8 +1128,9 @@
   function draw() {
     const now = performance.now();
     ctx.clearRect(0, 0, W, H);
-    drawClouds(now);
+    drawSky(now);
     for (const b of bubbles) drawBubble(b, now);
+    drawBoss(); drawBossHint(); drawCard();
     for (const p of particles) {
       const k = 1 - p.t / p.life;
       ctx.fillStyle = `hsla(${p.hue},95%,${p.star ? 90 : 75}%,${k})`;
@@ -709,7 +1165,8 @@
       ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot); ctx.fillStyle = c.color;
       ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h); ctx.restore();
     }
-    if (settings.find && target) drawTargetBadge(now);
+    drawPips(now);
+    if (settings.find && target && isPlaying()) drawTargetBadge(now);
   }
 
   // top-center card showing what to find, so it works with the voice off too
@@ -750,16 +1207,20 @@
     document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('on', +b.dataset.speed === settings.speed));
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
     document.getElementById('tVoice').classList.toggle('off', !settings.voice);
+    document.getElementById('tLevels').classList.toggle('off', !settings.levels);
+    document.querySelectorAll('[data-boss]').forEach(b => b.classList.toggle('on', +b.dataset.boss === settings.bossTaps));
   }
+  document.getElementById('tLevels').onclick = () => { settings.levels = !settings.levels; saveSettings(); syncPanel(); resetLevel(); target = null; newTarget(); };
+  document.querySelectorAll('[data-boss]').forEach(b => b.onclick = () => { settings.bossTaps = +b.dataset.boss; saveSettings(); syncPanel(); });
   document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
-    settings.mode = b.dataset.mode; saveSettings(); syncPanel();
+    settings.mode = b.dataset.mode; saveSettings(); syncPanel(); resetLevel();
     for (const bb of bubbles) bb.item = makeItem(settings.mode); // switch what's on screen right away
     queueWarm(); // the new mode's glyphs (and tinted bodies) get warmed
     target = null; newTarget();
   });
   document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { settings.speed = +b.dataset.speed; saveSettings(); syncPanel(); });
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
-  document.querySelectorAll('[data-find]').forEach(b => b.onclick = () => { settings.find = b.dataset.find === '1'; saveSettings(); syncPanel(); target = null; newTarget(); });
+  document.querySelectorAll('[data-find]').forEach(b => b.onclick = () => { settings.find = b.dataset.find === '1'; saveSettings(); syncPanel(); resetLevel(); target = null; newTarget(); });
   document.getElementById('tVoice').onclick = () => { settings.voice = !settings.voice; saveSettings(); syncPanel(); };
   document.getElementById('tFull').onclick = () => {
     const el = document.documentElement;
@@ -771,7 +1232,7 @@
   // The shared grown-up timer eases the sound down at bedtime and stops it at goodnight
   if (window.KidsGrownup) KidsGrownup.register({
     setVolume(v) { vol = v; asleep = false; if (out) out.gain.setTargetAtTime(v, actx.currentTime, 0.3); },
-    pause() { asleep = true; down.clear(); if ('speechSynthesis' in window) speechSynthesis.cancel(); if (actx) actx.suspend(); },
+    pause() { asleep = true; down.clear(); inBoss.clear(); if ('speechSynthesis' in window) speechSynthesis.cancel(); if (actx) actx.suspend(); },
   });
 
   resize(); // sizes the canvas and queues the sprites
@@ -785,7 +1246,10 @@
   // ?debug: a read-only snapshot for automated testing
   if (/[?&]debug/.test(location.search)) window.__bubblePop = () => ({ target: target && target.id, found, bubbles: bubbles.length,
     targets: bubbles.filter(b => target && b.item.id === target.id).map(b => ({ x: b.x, y: b.y })),
-    sprites: cacheStats() });
+    sprites: cacheStats(),
+    level: lv.level, phase: settings.levels ? lv.phase : 'play', pops: lv.pops, popsNeeded: popsNeeded(), bossHits: boss ? boss.hits : 0, bossTaps: bossNeed(),
+    look: lv.look, theme: THEMES[theme], stars: lv.stars, popCount, confetti: confetti.length, hint: !!boss && boss.idle >= 8, breakT: lv.t,
+    boss: bossUp() ? { ...bossPos(), r: bossR() } : null, leaving: bubbles.filter(b => b.leave).length });
 
   // Offline support (only works over HTTPS or localhost)
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
