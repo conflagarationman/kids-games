@@ -716,16 +716,22 @@
 
   // ---------- Input: every finger counts, swiping pops too ----------
   const down = new Set();
-  function hit(x, y) {
+  // A newborn bubble (a giant's minis, the boss's shower) appears right under the finger that popped its parent,
+  // and a real finger always jiggles: without a moment's grace the jiggle swipes every mini away before it scatters.
+  // A fresh tap still pops them at once.
+  const GRACE = 350;
+  function hit(x, y, isTap) {
+    const now = performance.now();
     for (let i = bubbles.length - 1; i >= 0; i--) {
       const b = bubbles[i];
+      if (!isTap && now - b.born < GRACE) continue;
       // generous hit zone for small, imprecise fingers
       if ((b.x - x) ** 2 + (b.y - y) ** 2 <= (b.r * 1.25 + 14) ** 2) return i;
     }
     return -1;
   }
   function touch(x, y, isTap) {
-    const i = hit(x, y);
+    const i = hit(x, y, isTap);
     if (i >= 0) { popBubble(i); return; }
     if (isTap) {
       // tapping empty sky still does something nice

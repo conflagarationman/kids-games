@@ -59,7 +59,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Sound limiter:** every game puts a `DynamicsCompressorNode` (threshold -12 dB, knee 6, ratio 12, attack 0.003, release 0.25) between its master gain and `actx.destination`, so piles of sounds don't distort on tablet speakers.
 - **Offline (`sw.js`):** stale-while-revalidate over a fixed `FILES` list.
   - **Prefix cleanup:** all games share one origin, so `activate` may delete only caches starting with that game's prefix (`k.startsWith('<game>-')`). Never delete other games' caches.
-  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v9`, `magic-paint-v9`, `little-band-v8`, `web-hero-v6`. Bumping gets installed copies to update.
+  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v10`, `magic-paint-v9`, `little-band-v8`, `web-hero-v6`. Bumping gets installed copies to update.
   - **Home page:** the root `sw.js` (cache `home-v1`, prefix `home-`) caches the home page, its covers and tile icons, `shared/` and the unlisted `verses/` page. The home page also registers every game's own worker (`register('<game>/sw.js', { scope: '<game>/' })`), so one visit to the home page online makes every game work offline. Each game's narrower scope wins inside its folder. Bump `home-v*` whenever anything the root `FILES` lists changes.
   - **New files:** add any file the game needs to `FILES`. Every game also lists `../shared/KidsRounded.woff2`, `../shared/grownup.js` and `../shared/grownup.css` (same origin, so the paths work).
 - **Look:** soft pastel gradients and white-outlined shapes. Fonts are "Trebuchet MS" for UI and "Kids Rounded" (bundled Nunito ExtraBold, then "Arial Rounded MT Bold") for big glyphs; ink is `#2b2d5c`; the bright palette is `#ff3b3b #ff9a1f #f5c800 #22b84a #2f7bff #a04dff #ff4fb0`.
@@ -105,7 +105,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Bubble count:** `maxBubbles()` covers about 22% of the screen with bubbles (8 to 18), with `baseR()` clamped between 36 and 80px. Rise speed is a share of `H` (`RISE`), so a trip takes the same time on any screen. The spawn timer keeps a steady flow; the cap is only a ceiling.
 - **Spawning:** `openX()` picks the most open bottom spot. Its fallback must stay a candidate spot: falling back to 0 caused a left-wall bias.
 - **Bubbles apart:** overlapping bubbles nudge apart.
-- **Giant bubbles:** every 11th spawn is a giant that bursts into 4 minis.
+- **Giant bubbles:** every 11th spawn is a giant that bursts into 4 minis. Minis are born under the finger that popped the giant, so `hit()` ignores bubbles younger than `GRACE` (350ms) for swipes; a fresh tap still pops them. Without it a finger's natural jiggle swiped all 4 away at once. The boss's shower of minis gets the same grace.
 - **Celebration:** every 12 pops (in free popping).
 - **Find it** (`settings.find`): items carry an `id` and an `ask` phrase. `newTarget()` picks one and puts it on at least 2 mid-screen bubbles. `newItem()` makes about 30% of new bubbles the target. The badge at top center shows the target, so it works with the voice off. After 3 misses or 12s, it asks again and the right bubbles shimmer (`hintGlow`). iOS needs a touch before speech, so the first ask is repeated on the first tap.
 - **Clouds:** drawn each frame behind the bubbles (`drawClouds`) from opaque cloud sprites with globalAlpha, so overlapping clouds have no seams.
