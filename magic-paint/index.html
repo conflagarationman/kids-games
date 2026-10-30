@@ -774,7 +774,8 @@
     requestAnimationFrame(loop);
   }
   function loop(t) {
-    const dt = Math.min(0.05, (t - last) / 1000); last = t;
+    // a frame queued before wake() can carry an older timestamp than `last`, so dt must not go negative
+    const dt = Math.max(0, Math.min(0.05, (t - last) / 1000)); last = t;
     update(dt); draw();
     if (busy()) requestAnimationFrame(loop); else sleep();
   }
