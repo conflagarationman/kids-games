@@ -87,7 +87,11 @@
     if (!actx) {
       try {
         actx = new (window.AudioContext || window.webkitAudioContext)();
-        master = actx.createGain(); master.gain.value = 0.8; master.connect(actx.destination);
+        master = actx.createGain(); master.gain.value = 0.8;
+        // limiter: a pile-up of crash sounds squeezes down instead of clipping
+        const lim = actx.createDynamicsCompressor();
+        lim.threshold.value = -12; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25;
+        master.connect(lim); lim.connect(actx.destination);
         noiseBuf = actx.createBuffer(1, actx.sampleRate * 0.5, actx.sampleRate);
         const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
       } catch (e) {}
@@ -226,10 +230,10 @@
 
   // ---------- Physics world & levels ----------
   const VEHICLES = [
-    { e: '🚗', w: 2.0, r: 0.7 }, { e: '🚕', w: 2.0, r: 0.7 }, { e: '🚙', w: 2.2, r: 0.7 }, { e: '🏎️', w: 2.1, r: 0.6 },
-    { e: '🚌', w: 2.6, r: 0.76 }, { e: '🚒', w: 2.6, r: 0.76 }, { e: '🚚', w: 2.5, r: 0.72 }, { e: '🚛', w: 2.6, r: 0.72 }, { e: '🚜', w: 2.2, r: 0.8 },
+    { id: 'car', w: 2.0, r: 0.7 }, { id: 'taxi', w: 2.0, r: 0.7 }, { id: 'suv', w: 2.2, r: 0.7 }, { id: 'racer', w: 2.1, r: 0.6 },
+    { id: 'bus', w: 2.6, r: 0.76 }, { id: 'fire', w: 2.6, r: 0.76 }, { id: 'van', w: 2.5, r: 0.72 }, { id: 'dump', w: 2.6, r: 0.72 }, { id: 'tractor', w: 2.2, r: 0.8 },
   ];
-  const veh = e => VEHICLES.find(v => v.e === e);
+  const veh = id => VEHICLES.find(v => v.id === id);
   let engine, dyn = [], vehicles = [], balls = [], yanks = [], trails = [], live = false;
   let shake = 0;
   let level = 1, stars = 0, starBump = 0, clearTimer = 0, shotFired = false;
@@ -252,7 +256,7 @@
   function addVehicle(x, y, v) {
     const w = v.w * u, h = w * v.r;
     const b = Bodies.rectangle(x, y, w, h, { ...MAT, density: 0.001, slop: 0.02, chamfer: { radius: h * 0.22 } });
-    Object.assign(b.plugin, { kind: 'vehicle', vehicle: true, e: v.e, w, h, knocked: false, squash: 0, sqT: 0, pitch: pick([330, 370, 415, 440]) });
+    Object.assign(b.plugin, { kind: 'vehicle', vehicle: true, id: v.id, w, h, roll: 0, knocked: false, squash: 0, sqT: 0, pitch: pick([330, 370, 415, 440]) });
     vehicles.push(b); return addBody(b);
   }
   const GAP = 0.6;
@@ -286,9 +290,9 @@
   // hand-made first levels
   function tutorial(n) {
     const c = (rows, nn = 1) => ({ t: 'crates', n: nn, rows });
-    if (n === 1) return [{ cx: W * 0.56, layers: [c(1), { t: 'veh', v: '🚗' }] }];
-    if (n === 2) return [{ cx: W * 0.62, layers: [c(2), { t: 'veh', v: '🚚' }] }];
-    return [{ cx: W * 0.55, layers: [c(1), { t: 'veh', v: '🚕' }] }, { cx: W * 0.78, layers: [c(2), { t: 'veh', v: '🚙' }] }];
+    if (n === 1) return [{ cx: W * 0.56, layers: [c(1), { t: 'veh', v: 'car' }] }];
+    if (n === 2) return [{ cx: W * 0.62, layers: [c(2), { t: 'veh', v: 'van' }] }];
+    return [{ cx: W * 0.55, layers: [c(1), { t: 'veh', v: 'taxi' }] }, { cx: W * 0.78, layers: [c(2), { t: 'veh', v: 'suv' }] }];
   }
 
   // seeded generator: same level number + difficulty always gives the same plan
@@ -298,7 +302,7 @@
     const cfg = { easy: { t: [1, 2], v: [2, 3], rows: [1, 2] }, medium: { t: [2, 3], v: [3, 5], rows: [1, 3] }, big: { t: [3, 4], v: [5, 7], rows: [2, 4] } }[diff];
     const sar = inset('--sar'), xl = W * (diff === 'big' ? 0.33 : 0.45), xr = W - sar - Math.max(8, W * 0.03);
     const Wu = (xr - xl) / u, availH = groundY - inset('--sat') - u * 2.8;
-    const pickV = max => { const l = VEHICLES.filter(v => v.w <= max); return l[Math.floor(R() * l.length)].e; };
+    const pickV = max => { const l = VEHICLES.filter(v => v.w <= max); return l[Math.floor(R() * l.length)].id; };
     let nV = ri(...cfg.v), nT = ri(...cfg.t);
     const bridge = diff === 'big' && Wu >= 6.4;
     let towers = bridge ? Math.max(1, nT - 2) : nT;
@@ -391,7 +395,7 @@
         const gone = b.position.x < -p.w || b.position.x > W + p.w || b.position.y > H + u;
         const moved = Math.hypot(b.position.x - p.start.x, b.position.y - p.start.y);
         if (ang > 1.0472 || b.position.y > p.start.y + p.h || gone || moved > p.w * 0.9) {
-          p.knocked = true; stars++; starBump = 1; burst(b.position.x, b.position.y - p.h * 0.3);
+          p.knocked = true; stars++; starBump = 1; burst(b.position.x, b.position.y - p.h * 0.3); bits(b);
           honk(p.pitch, true); ding(stars); heroJump();
         }
       }
@@ -402,6 +406,13 @@
   const BRIGHT = ['#ff3b3b', '#ff9a1f', '#f5c800', '#22b84a', '#2f7bff', '#a04dff', '#ff4fb0'];
   function burst(x, y) {
     for (let k = 0; k < 12; k++) { const a = Math.random() * 6.283, s = rnd(u * 2, u * 6); particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - u * 2, t: 0, r: rnd(u * 0.18, u * 0.34), rot: Math.random() * 6, color: pick(['#ffd23f', '#fff3a8', '#ff9a1f', '#ffffff']) }); }
+  }
+  // a hubcap and a few painted chips pop off a knocked vehicle
+  function bits(b) {
+    const p = b.plugin, [fx, fr] = WHEELS[p.id][0], ca = Math.cos(b.angle), sa = Math.sin(b.angle), lx = fx * p.w, ly = p.h / 2 - fr * p.w;
+    const hx = b.position.x + lx * ca - ly * sa, hy = b.position.y + lx * sa + ly * ca;
+    particles.push({ kind: 'hub', x: hx, y: hy, vx: rnd(-u * 3, u * 1.5), vy: -rnd(u * 4, u * 7), t: 0, r: fr * p.w * 0.58, rot: 0, color: '#e8ecf7' });
+    for (let k = 0; k < 4; k++) particles.push({ kind: 'chip', x: b.position.x + rnd(-p.w, p.w) * 0.3, y: b.position.y - p.h * 0.2, vx: rnd(-u * 4, u * 4), vy: -rnd(u * 2, u * 5), t: 0, r: rnd(u * 0.1, u * 0.18), rot: Math.random() * 6, color: VCOL[p.id] });
   }
   function dust(x, y, k) {
     for (let i = 0; i < 3 + k * 4; i++) { const a = Math.random() * 6.283, s = rnd(u * 0.4, u * 1.6) * (0.5 + k); particles.push({ dust: true, x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - u * 0.6, t: 0, r: rnd(u * 0.15, u * 0.35) * (0.6 + k), color: 'rgba(240,232,220,.9)' }); }
@@ -554,6 +565,164 @@
   }
   addEventListener('resize', resize);
 
+  // ---------- Vehicle art: flat shapes in the game's pastel style, front toward the left ----------
+  // Each body is drawn once into an offscreen sprite per size; the wheels are drawn live so they can spin.
+  const INK = '#2b2d5c', GLASS = '#bfe6ff', GLASS_HI = '#e9f7ff';
+  const mix = (hex, to, t) => { const a = parseInt(hex.slice(1), 16), b = parseInt(to.slice(1), 16), f = s => Math.round(((a >> s) & 255) * (1 - t) + ((b >> s) & 255) * t);
+    return `rgb(${f(16)},${f(8)},${f(0)})`; };
+  const dk = hex => mix(hex, INK, 0.3);
+  // [x, radius] of each wheel as fractions of the vehicle width; the wheel sits on the bottom edge
+  const WHEELS = {
+    car: [[-0.27, 0.16], [0.27, 0.16]], taxi: [[-0.27, 0.16], [0.27, 0.16]], suv: [[-0.3, 0.155], [0.3, 0.155]], racer: [[-0.3, 0.16], [0.3, 0.17]],
+    bus: [[-0.3, 0.14], [0.3, 0.14]], fire: [[-0.36, 0.13], [0.11, 0.115], [0.35, 0.115]], van: [[-0.32, 0.14], [0.3, 0.14]],
+    dump: [[-0.36, 0.13], [0.2, 0.11], [0.41, 0.11]], tractor: [[-0.34, 0.13], [0.24, 0.26]],
+  };
+  const VCOL = { car: '#ff3b3b', taxi: '#f5c800', suv: '#1fb5a8', racer: '#ff4fb0', bus: '#2f7bff', fire: '#e8262a', van: '#a04dff', dump: '#22b84a', tractor: '#ff9a1f' };
+  // a rounded slab with a darker lower band and a soft highlight, like the hero's shading
+  function slab(c, x, y, w, h, rad, col) {
+    c.save(); rr(c, x, y, w, h, rad); c.clip();
+    c.fillStyle = col; c.fillRect(x, y, w, h);
+    c.fillStyle = dk(col); c.fillRect(x, y + h * 0.7, w, h * 0.3);
+    c.fillStyle = 'rgba(255,255,255,.28)'; c.fillRect(x, y + h * 0.07, w, h * 0.09);
+    c.restore();
+  }
+  function glass(c, x, y, w, h, rad) {
+    c.fillStyle = GLASS; rr(c, x, y, w, h, rad); c.fill();
+    c.fillStyle = GLASS_HI; c.beginPath(); c.moveTo(x + w * 0.15, y + h * 0.9); c.lineTo(x + w * 0.45, y + h * 0.1); c.lineTo(x + w * 0.6, y + h * 0.1); c.lineTo(x + w * 0.3, y + h * 0.9); c.fill();
+  }
+  function lamps(c, w, h, fx, fy, bx, by, rad) {
+    c.fillStyle = '#fff3a8'; c.beginPath(); c.arc(fx, fy, rad, 0, 7); c.fill();
+    c.fillStyle = '#ff3b3b'; rr(c, bx - rad * 0.8, by - rad, rad * 1.1, rad * 2, rad * 0.4); c.fill();
+  }
+  const ART = {
+    car(c, w, h) {
+      const col = VCOL.car, X = f => f * w, Y = f => f * h;
+      c.fillStyle = col; c.beginPath(); c.moveTo(X(-0.3), Y(-0.1)); c.bezierCurveTo(X(-0.24), Y(-0.5), X(-0.12), Y(-0.5), X(0.1), Y(-0.5));
+      c.bezierCurveTo(X(0.26), Y(-0.5), X(0.32), Y(-0.3), X(0.36), Y(-0.1)); c.closePath(); c.fill();
+      c.fillStyle = GLASS; c.beginPath(); c.moveTo(X(-0.24), Y(-0.1)); c.bezierCurveTo(X(-0.2), Y(-0.4), X(-0.12), Y(-0.43), X(-0.03), Y(-0.43)); c.lineTo(X(-0.02), Y(-0.1)); c.closePath(); c.fill();
+      c.beginPath(); c.moveTo(X(0.03), Y(-0.1)); c.lineTo(X(0.03), Y(-0.43)); c.bezierCurveTo(X(0.18), Y(-0.43), X(0.23), Y(-0.3), X(0.27), Y(-0.1)); c.closePath(); c.fill();
+      slab(c, X(-0.5), Y(-0.12), w, Y(0.5), Y(0.14), col);
+      lamps(c, w, h, X(-0.45), Y(0.04), X(0.48), Y(0.04), w * 0.04);
+      c.fillStyle = dk(col); rr(c, X(-0.2), Y(0.12), X(0.14), Y(0.05), Y(0.025)); c.fill();
+    },
+    taxi(c, w, h) {
+      const col = VCOL.taxi, X = f => f * w, Y = f => f * h;
+      slab(c, X(-0.5), Y(-0.08), w, Y(0.46), Y(0.12), col);
+      c.fillStyle = col; c.beginPath(); c.moveTo(X(-0.27), Y(-0.08)); c.lineTo(X(-0.17), Y(-0.38)); c.lineTo(X(0.12), Y(-0.38)); c.lineTo(X(0.2), Y(-0.08)); c.closePath(); c.fill();
+      c.fillStyle = GLASS; c.beginPath(); c.moveTo(X(-0.23), Y(-0.1)); c.lineTo(X(-0.155), Y(-0.33)); c.lineTo(X(-0.02), Y(-0.33)); c.lineTo(X(-0.02), Y(-0.1)); c.closePath(); c.fill();
+      c.beginPath(); c.moveTo(X(0.02), Y(-0.1)); c.lineTo(X(0.02), Y(-0.33)); c.lineTo(X(0.105), Y(-0.33)); c.lineTo(X(0.165), Y(-0.1)); c.closePath(); c.fill();
+      slab(c, X(-0.1), Y(-0.5), X(0.2), Y(0.13), Y(0.05), '#ffffff');
+      c.fillStyle = INK; c.save(); rr(c, X(-0.5), Y(0.0), w, Y(0.09), 0); c.clip();
+      for (let i = 0; i < 18; i++) if (i % 2 === 0) c.fillRect(X(-0.5) + i * w / 18, Y(0.0), w / 18, Y(0.045)); else c.fillRect(X(-0.5) + i * w / 18, Y(0.045), w / 18, Y(0.045));
+      c.restore();
+      lamps(c, w, h, X(-0.45), Y(0.2), X(0.48), Y(0.2), w * 0.035);
+    },
+    suv(c, w, h) {
+      const col = VCOL.suv, X = f => f * w, Y = f => f * h;
+      c.fillStyle = INK; rr(c, X(-0.3), Y(-0.46), X(0.5), Y(0.05), Y(0.02)); c.fill();
+      slab(c, X(-0.5), Y(-0.42), X(0.86), Y(0.78), Y(0.14), col);
+      glass(c, X(-0.4), Y(-0.34), X(0.3), Y(0.3), Y(0.07)); glass(c, X(-0.07), Y(-0.34), X(0.2), Y(0.3), Y(0.07)); glass(c, X(0.16), Y(-0.34), X(0.16), Y(0.3), Y(0.07));
+      c.fillStyle = dk(col); c.fillRect(X(-0.5), Y(0.02), X(0.86), Y(0.03));
+      lamps(c, w, h, X(-0.455), Y(0.16), X(0.34), Y(0.16), w * 0.035);
+      c.fillStyle = '#2a2c44'; c.beginPath(); c.arc(X(0.43), Y(0.06), X(0.065), 0, 7); c.fill(); c.fillStyle = '#e8ecf7'; c.beginPath(); c.arc(X(0.43), Y(0.06), X(0.035), 0, 7); c.fill();
+    },
+    racer(c, w, h) {
+      const col = VCOL.racer, X = f => f * w, Y = f => f * h;
+      c.fillStyle = dk(col); rr(c, X(0.36), Y(-0.42), X(0.035), Y(0.4), 2); c.fill(); rr(c, X(0.44), Y(-0.42), X(0.035), Y(0.4), 2); c.fill();
+      c.save(); c.beginPath(); c.moveTo(X(-0.5), Y(0.38)); c.lineTo(X(-0.5), Y(0.1)); c.quadraticCurveTo(X(-0.42), Y(-0.12), X(-0.16), Y(-0.18)); c.lineTo(X(0.46), Y(-0.18)); c.lineTo(X(0.5), Y(0.38)); c.closePath(); c.clip();
+      c.fillStyle = col; c.fillRect(X(-0.5), Y(-0.2), w, Y(0.6)); c.fillStyle = dk(col); c.fillRect(X(-0.5), Y(0.24), w, Y(0.16));
+      c.fillStyle = '#fff'; c.fillRect(X(-0.5), Y(0.05), w, Y(0.08)); c.fillStyle = 'rgba(255,255,255,.28)'; c.fillRect(X(-0.5), Y(-0.17), w, Y(0.04)); c.restore();
+      c.fillStyle = GLASS; c.beginPath(); c.moveTo(X(-0.13), Y(-0.18)); c.quadraticCurveTo(X(-0.1), Y(-0.5), X(0.08), Y(-0.5)); c.quadraticCurveTo(X(0.2), Y(-0.5), X(0.25), Y(-0.18)); c.closePath(); c.fill();
+      c.fillStyle = GLASS_HI; c.beginPath(); c.moveTo(X(-0.06), Y(-0.2)); c.lineTo(X(-0.02), Y(-0.42)); c.lineTo(X(0.03), Y(-0.42)); c.lineTo(X(0.0), Y(-0.2)); c.fill();
+      slab(c, X(0.3), Y(-0.5), X(0.22), Y(0.12), Y(0.04), '#ffffff');
+      c.fillStyle = '#fff3a8'; c.beginPath(); c.arc(X(-0.45), Y(0.12), w * 0.03, 0, 7); c.fill();
+    },
+    bus(c, w, h) {
+      const col = VCOL.bus, X = f => f * w, Y = f => f * h;
+      slab(c, X(-0.5), Y(-0.46), w, Y(0.82), Y(0.16), col);
+      c.fillStyle = '#fff'; c.fillRect(X(-0.5), Y(0.06), w, Y(0.06));
+      for (let i = 0; i < 5; i++) glass(c, X(-0.31 + i * 0.165), Y(-0.36), X(0.13), Y(0.32), Y(0.06));
+      c.fillStyle = dk(col); rr(c, X(-0.47), Y(-0.38), X(0.11), Y(0.7), Y(0.05)); c.fill(); glass(c, X(-0.455), Y(-0.34), X(0.08), Y(0.5), Y(0.04));
+      c.fillStyle = '#fff'; rr(c, X(-0.08), Y(-0.5), X(0.16), Y(0.06), Y(0.03)); c.fill();
+      lamps(c, w, h, X(-0.475), Y(0.2), X(0.49), Y(0.2), w * 0.03);
+    },
+    fire(c, w, h) {
+      const col = VCOL.fire, X = f => f * w, Y = f => f * h;
+      c.fillStyle = '#e8edf7'; rr(c, X(-0.02), Y(-0.5), X(0.5), Y(0.05), Y(0.02)); c.fill(); rr(c, X(-0.02), Y(-0.41), X(0.5), Y(0.05), Y(0.02)); c.fill();
+      c.fillStyle = '#9aa4c4'; for (let i = 0; i < 10; i++) c.fillRect(X(0.01 + i * 0.05), Y(-0.46), X(0.012), Y(0.06));
+      slab(c, X(-0.05), Y(-0.36), X(0.55), Y(0.72), Y(0.1), col);
+      slab(c, X(-0.5), Y(-0.28), X(0.4), Y(0.64), Y(0.12), col);
+      c.fillStyle = '#ffd23f'; c.fillRect(X(-0.5), Y(0.0), w, Y(0.05));
+      glass(c, X(-0.43), Y(-0.21), X(0.27), Y(0.19), Y(0.06));
+      c.fillStyle = dk(col); for (let i = 0; i < 3; i++) { rr(c, X(0.0 + i * 0.17), Y(0.1), X(0.14), Y(0.2), Y(0.04)); c.fill(); }
+      c.fillStyle = '#e8edf7'; for (let i = 0; i < 3; i++) c.fillRect(X(0.1 + i * 0.17), Y(0.17), X(0.03), Y(0.06));
+      c.fillStyle = '#ffe46a'; c.beginPath(); c.arc(X(-0.3), Y(-0.31), X(0.045), Math.PI, 0); c.fill();
+      lamps(c, w, h, X(-0.47), Y(0.15), X(0.48), Y(0.15), w * 0.03);
+    },
+    van(c, w, h) {
+      const col = VCOL.van, X = f => f * w, Y = f => f * h;
+      slab(c, X(-0.12), Y(-0.5), X(0.62), Y(0.86), Y(0.1), '#f4f6ff');
+      c.fillStyle = col; c.fillRect(X(-0.12), Y(0.02), X(0.62), Y(0.09));
+      c.fillStyle = col; c.beginPath(); c.arc(X(0.2), Y(-0.2), X(0.09), 0, 7); c.fill();
+      c.fillStyle = '#ffd23f'; c.beginPath(); for (let i = 0; i < 10; i++) { const r = i % 2 ? X(0.025) : X(0.06), a = -Math.PI / 2 + i * Math.PI / 5; c.lineTo(X(0.2) + Math.cos(a) * r, Y(-0.2) + Math.sin(a) * r); } c.fill();
+      c.fillStyle = col; c.beginPath(); c.moveTo(X(-0.5), Y(0.36)); c.lineTo(X(-0.5), Y(-0.02)); c.quadraticCurveTo(X(-0.49), Y(-0.1), X(-0.4), Y(-0.12)); c.lineTo(X(-0.34), Y(-0.34)); c.quadraticCurveTo(X(-0.32), Y(-0.4), X(-0.26), Y(-0.4)); c.lineTo(X(-0.12), Y(-0.4)); c.lineTo(X(-0.12), Y(0.36)); c.closePath(); c.fill();
+      c.fillStyle = dk(col); c.fillRect(X(-0.5), Y(0.2), X(0.38), Y(0.16));
+      c.fillStyle = GLASS; c.beginPath(); c.moveTo(X(-0.4), Y(-0.1)); c.lineTo(X(-0.325), Y(-0.31)); c.lineTo(X(-0.2), Y(-0.31)); c.lineTo(X(-0.2), Y(-0.1)); c.closePath(); c.fill();
+      lamps(c, w, h, X(-0.465), Y(0.08), X(0.485), Y(0.2), w * 0.03);
+    },
+    dump(c, w, h) {
+      const col = VCOL.dump, bed = '#f5c800', X = f => f * w, Y = f => f * h;
+      c.fillStyle = INK; rr(c, X(-0.5), Y(0.2), w, Y(0.16), Y(0.05)); c.fill();
+      slab(c, X(-0.2), Y(-0.36), X(0.7), Y(0.62), Y(0.07), bed);
+      c.fillStyle = dk(bed); for (let i = 0; i < 4; i++) c.fillRect(X(-0.06 + i * 0.15), Y(-0.34), X(0.025), Y(0.5));
+      c.fillStyle = dk(bed); rr(c, X(-0.22), Y(-0.5), X(0.1), Y(0.64), Y(0.04)); c.fill();
+      c.fillStyle = col; c.beginPath(); c.moveTo(X(-0.5), Y(0.26)); c.lineTo(X(-0.5), Y(-0.02)); c.quadraticCurveTo(X(-0.49), Y(-0.1), X(-0.42), Y(-0.12)); c.lineTo(X(-0.38), Y(-0.28)); c.quadraticCurveTo(X(-0.36), Y(-0.36), X(-0.29), Y(-0.36)); c.lineTo(X(-0.22), Y(-0.36)); c.lineTo(X(-0.22), Y(0.26)); c.closePath(); c.fill();
+      c.fillStyle = dk(col); c.fillRect(X(-0.5), Y(0.12), X(0.28), Y(0.14));
+      c.fillStyle = GLASS; c.beginPath(); c.moveTo(X(-0.42), Y(-0.08)); c.lineTo(X(-0.375), Y(-0.26)); c.lineTo(X(-0.26), Y(-0.26)); c.lineTo(X(-0.26), Y(-0.08)); c.closePath(); c.fill();
+      c.fillStyle = INK; c.fillRect(X(-0.33), Y(-0.52), X(0.02), Y(0.16)); // exhaust stack
+      lamps(c, w, h, X(-0.47), Y(0.04), X(0.49), Y(0.12), w * 0.03);
+    },
+    tractor(c, w, h) {
+      const col = VCOL.tractor, X = f => f * w, Y = f => f * h;
+      c.fillStyle = INK; rr(c, X(-0.33), Y(-0.34), X(0.035), Y(0.28), 2); c.fill();
+      slab(c, X(-0.5), Y(-0.08), X(0.6), Y(0.4), Y(0.1), col);
+      c.fillStyle = INK; rr(c, X(-0.01), Y(-0.5), X(0.42), Y(0.05), Y(0.025)); c.fill();
+      c.fillStyle = col; rr(c, X(0.0), Y(-0.46), X(0.4), Y(0.5), Y(0.06)); c.fill();
+      glass(c, X(0.04), Y(-0.41), X(0.32), Y(0.34), Y(0.05));
+      c.fillStyle = dk(col); c.beginPath(); c.arc(X(0.24), Y(0.5) - X(0.26), X(0.3), Math.PI, 0); c.fill();
+      c.fillStyle = '#fff3a8'; c.beginPath(); c.arc(X(-0.47), Y(0.06), w * 0.03, 0, 7); c.fill();
+    },
+  };
+  // one sprite per vehicle type and on-screen size (the wheel wells are cut into it, the wheels go on top)
+  const sprites = new Map();
+  function sprite(id, w, h) {
+    const key = id + '|' + Math.round(w * dpr), pad = 2;
+    let s = sprites.get(key);
+    if (!s) {
+      s = document.createElement('canvas'); s.width = Math.ceil((w + pad * 2) * dpr); s.height = Math.ceil((h + pad * 2) * dpr);
+      const c = s.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, s.width / 2, s.height / 2); c.lineJoin = 'round';
+      ART[id](c, w, h);
+      c.fillStyle = '#23253f'; for (const [fx, fr] of WHEELS[id]) { c.beginPath(); c.arc(fx * w, h / 2 - fr * w, fr * w * 1.14, Math.PI, 0); c.fill(); }
+      sprites.set(key, s);
+    }
+    return s;
+  }
+  function wheel(x, y, r, a) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+    ctx.fillStyle = '#2a2c44'; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
+    ctx.fillStyle = '#e8ecf7'; ctx.beginPath(); ctx.arc(0, 0, r * 0.58, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#9aa4c4'; ctx.lineWidth = Math.max(1, r * 0.12); ctx.lineCap = 'round';
+    ctx.beginPath(); for (let i = 0; i < 3; i++) { ctx.moveTo(0, 0); ctx.lineTo(Math.cos(i * 2.094) * r * 0.5, Math.sin(i * 2.094) * r * 0.5); } ctx.stroke();
+    ctx.fillStyle = '#6b7499'; ctx.beginPath(); ctx.arc(0, 0, r * 0.14, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  // draws a vehicle centered at the origin, wheels turned by how far it has rolled (roll is in px)
+  function paintVehicle(id, w, h, roll) {
+    const pad = 2, s = sprite(id, w, h);
+    ctx.drawImage(s, -w / 2 - pad, -h / 2 - pad, s.width / dpr, s.height / dpr);
+    for (const [fx, fr] of WHEELS[id]) wheel(fx * w, h / 2 - fr * w, fr * w, roll / (fr * w));
+  }
+
   // ---------- Drawing ----------
   function drawCrate(b) {
     const w = b.plugin.w, h = b.plugin.h;
@@ -575,11 +744,12 @@
   }
   function drawVehicle(b, dt) {
     const p = b.plugin; p.sqT += dt; p.squash *= Math.exp(-dt * 6);
+    // wheels turn with the distance rolled along the body's own axis, and whirl a little when it tumbles
+    if (p.px !== undefined) p.roll += (b.position.x - p.px) * Math.cos(b.angle) + (b.position.y - p.py) * Math.sin(b.angle) + (b.angle - p.pa) * p.w * 0.35;
+    p.px = b.position.x; p.py = b.position.y; p.pa = b.angle;
     const sq = p.squash * Math.cos(p.sqT * 28);
     ctx.scale(1 + sq, 1 - sq);
-    ctx.fillStyle = '#000';
-    ctx.font = `${p.w * 1.0}px ${EMOJI}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(p.e, 0, p.h * 0.04);
+    paintVehicle(p.id, p.w, p.h, p.roll);
   }
   function drawBall() {
     const r = u * 0.4;
@@ -665,6 +835,10 @@
     for (const p of particles) {
       ctx.save(); ctx.translate(p.x, p.y);
       if (p.dust) { ctx.globalAlpha = Math.max(0, 1 - p.t / 0.6) * 0.8; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(0, 0, p.r, 0, 7); ctx.fill(); }
+      else if (p.kind === 'hub') {
+        ctx.globalAlpha = Math.max(0, 1 - p.t / 0.9); ctx.scale(1, Math.abs(Math.cos(p.t * 14)) * 0.8 + 0.2);
+        ctx.fillStyle = p.color; ctx.strokeStyle = '#9aa4c4'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, p.r, 0, 7); ctx.fill(); ctx.stroke();
+      } else if (p.kind === 'chip') { ctx.globalAlpha = Math.max(0, 1 - p.t / 0.9); ctx.rotate(p.rot + p.t * 9); ctx.fillStyle = p.color; rr(ctx, -p.r, -p.r, p.r * 2, p.r * 2, p.r * 0.4); ctx.fill(); }
       else { ctx.globalAlpha = Math.max(0, 1 - p.t / 0.9); ctx.rotate(p.rot + p.t * 4); star(0, 0, p.r, p.r * 0.45, p.color, '#e0a800', 1.5); }
       ctx.restore();
     }
@@ -678,13 +852,13 @@
     const vs = Math.min(40, Math.max(24, u * 0.7)), numFont = `900 ${bh * 0.62}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
     if (vehicles.length) {
       const s = vs, gap = s * 0.25;
-      let x = bx + s / 2 + 4; const y = by + bh + 8 + s / 2;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      let x = bx + 4; const y = by + bh + 8 + s / 2;
       for (const v of vehicles) {
-        ctx.globalAlpha = v.plugin.knocked ? 0.35 : 1; ctx.fillStyle = '#000';
-        ctx.font = `${s}px ${EMOJI}`; ctx.fillText(v.plugin.e, x, y);
-        if (v.plugin.knocked) { ctx.globalAlpha = 1; ctx.font = `${s * 0.6}px ${EMOJI}`; ctx.fillText('⭐', x + s * 0.3, y - s * 0.3); }
-        x += s + gap;
+        const p = v.plugin, vw = s * 0.62 * veh(p.id).w, vh = vw * veh(p.id).r;
+        ctx.save(); ctx.translate(x + vw / 2, y); ctx.globalAlpha = p.knocked ? 0.35 : 1;
+        paintVehicle(p.id, vw, vh, 0); ctx.restore();
+        if (p.knocked) { ctx.globalAlpha = 1; ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `${s * 0.6}px ${EMOJI}`; ctx.fillText('⭐', x + vw - s * 0.1, y - s * 0.3); }
+        x += vw + gap;
       }
       ctx.globalAlpha = 1;
     }
