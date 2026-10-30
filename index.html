@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Kids Games</title>
 <meta name="theme-color" content="#8fd8ff">
+<link rel="preload" href="shared/KidsRounded.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  @font-face { font-family: "Kids Rounded"; src: url("shared/KidsRounded.woff2") format("woff2"); font-weight: 100 900; font-display: block; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; min-height: 100%; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; color: #2b2d5c; }
   body {
@@ -13,6 +15,7 @@
     padding: calc(28px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
   }
   header { text-align: center; margin: 0 auto 24px; }
+  h1, .info b { font-family: "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", "Segoe UI", system-ui, sans-serif; }
   h1 { font-size: clamp(36px, 9vw, 64px); margin: 0; color: #fff; text-shadow: 0 4px 0 #ff6fb1, 0 8px 18px rgba(43,45,92,.2); letter-spacing: .5px; }
   header p { margin: 6px 0 0; font-size: clamp(15px, 3.6vw, 19px); font-weight: 700; color: #fff; opacity: .95; text-shadow: 0 1px 4px rgba(43,45,92,.25); }
 

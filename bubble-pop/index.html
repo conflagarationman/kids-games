@@ -11,7 +11,9 @@
 <meta name="apple-mobile-web-app-title" content="Bubble Pop">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#8fd8ff">
+<link rel="preload" href="../shared/KidsRounded.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  @font-face { font-family: "Kids Rounded"; src: url("../shared/KidsRounded.woff2") format("woff2"); font-weight: 100 900; font-display: block; }
   :root { --sat: env(safe-area-inset-top); }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
@@ -27,7 +29,7 @@
   #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; }
   #panel.open { display: flex; }
   .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
-  .card h2 { margin: 0 0 4px; }
+  .card h2 { margin: 0 0 4px; font-family: "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; }
   .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
   .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
   .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -375,7 +377,7 @@
   // Memory matters here (iOS Safari kills pages that use too much canvas), so: one master per look, glyph
   // masters cropped to the glyph, bubble bodies without the rim (that is one live stroke), clouds at half size.
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
-  const TEXT_FONT = '"Arial Rounded MT Bold","Trebuchet MS",sans-serif';
+  const TEXT_FONT = '"Kids Rounded","Arial Rounded MT Bold","Trebuchet MS",sans-serif';
   const HUES = 12, CLOUD_RES = 0.5;
   const bodySprites = new Map(), itemSprites = new Map();
   let cloudSprites = [];
@@ -762,6 +764,9 @@
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
 
   resize(); // sizes the canvas and queues the sprites
+  // Canvas text doesn't wait for web fonts, so the letter and number sprites are built again once the font is in.
+  // Nothing waits on this: the game plays at once with the fallback font and swaps in a moment later.
+  if (document.fonts && document.fonts.load) document.fonts.load('900 64px "Kids Rounded"').then(() => buildSprites(), () => {});
   // start with the sky already full
   for (let i = 0, n = maxBubbles(); i < n; i++) spawnBubble(undefined, H * (0.1 + 0.9 * (i + Math.random()) / n), { giant: false });
   newTarget();

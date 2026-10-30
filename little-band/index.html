@@ -11,7 +11,9 @@
 <meta name="apple-mobile-web-app-title" content="Little Band">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ffd88a">
+<link rel="preload" href="../shared/KidsRounded.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  @font-face { font-family: "Kids Rounded"; src: url("../shared/KidsRounded.woff2") format("woff2"); font-weight: 100 900; font-display: block; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   body { background: linear-gradient(180deg, #ffd88a 0%, #ffb3a7 55%, #c9b8ff 100%); }
@@ -27,7 +29,7 @@
   #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; overflow-y: auto; padding: 16px 0; }
   #panel.open { display: flex; }
   .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); margin: auto; }
-  .card h2 { margin: 0 0 4px; }
+  .card h2 { margin: 0 0 4px; font-family: "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; }
   .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
   .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
   .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -512,7 +514,7 @@
       // the label sits near the bottom where a finger doesn't cover it
       const cx = k.x + k.w / 2, cy = k.y + k.h - Math.min(k.w * 0.5, k.h * 0.12);
       if (settings.labels === 'letters') {
-        c.font = `900 ${Math.min(k.w * 0.5, 34)}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
+        c.font = `900 ${Math.min(k.w * 0.5, 34)}px "Kids Rounded","Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
         c.textAlign = 'center'; c.textBaseline = 'middle';
         c.fillStyle = down ? '#fff' : k.color; c.fillText(k.name, cx, cy);
       } else {
@@ -571,7 +573,7 @@
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const n of notes) {
       ctx.globalAlpha = Math.max(0, 1 - n.t / 1.1);
-      ctx.font = `900 ${n.size}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
+      ctx.font = `900 ${n.size}px "Kids Rounded","Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
       ctx.lineWidth = n.size * 0.12; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round';
       ctx.strokeText(n.glyph, n.x, n.y); ctx.fillStyle = n.color; ctx.fillText(n.glyph, n.x, n.y);
     }
@@ -620,6 +622,8 @@
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
 
   requestAnimationFrame(loop);
+  // Canvas text doesn't wait for web fonts: the key labels live in the cached layers, so build them again once the font is in
+  if (document.fonts && document.fonts.load) document.fonts.load('900 64px "Kids Rounded"').then(() => rebuild(), () => {});
 
   // Offline support (only works over HTTPS or localhost)
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});

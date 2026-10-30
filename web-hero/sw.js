@@ -1,7 +1,7 @@
 // Offline support: cache everything, serve from cache, refresh in the background when online.
 // All the games share one site, so only clear out this game's own old caches.
-const CACHE = 'web-hero-v4';
-const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png', './matter.min.js', './cover.svg'];
+const CACHE = 'web-hero-v5';
+const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png', './matter.min.js', './cover.svg', '../shared/KidsRounded.woff2'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
