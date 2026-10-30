@@ -91,11 +91,18 @@
 
   // ---------- Audio: every instrument is made right here, no sound files ----------
   let actx = null, master = null, noiseBuf = null;
+  const LIMITER_TRIM = 0.535;
   function audio() {
     if (!actx) {
       try {
         actx = new (window.AudioContext || window.webkitAudioContext)();
-        master = actx.createGain(); master.gain.value = 0.8; master.connect(actx.destination);
+        // everything (notes, drums, the beat) goes master -> limiter -> speakers, so a pile of held notes can't clip
+        master = actx.createGain(); master.gain.value = 0.8;
+        const limiter = actx.createDynamicsCompressor();
+        limiter.threshold.value = -12; limiter.knee.value = 6; limiter.ratio.value = 12; limiter.attack.value = 0.003; limiter.release.value = 0.25;
+        // the compressor adds makeup gain (about +5 dB, the same for every note); this takes it back out so one note sounds as before
+        const trim = actx.createGain(); trim.gain.value = LIMITER_TRIM;
+        master.connect(limiter); limiter.connect(trim); trim.connect(actx.destination);
         noiseBuf = actx.createBuffer(1, actx.sampleRate * 0.5, actx.sampleRate);
         const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
       } catch (e) {}
@@ -113,7 +120,10 @@
     guitar: { icon: '🎸', parts: [['sawtooth', 0.5, 0.7], ['triangle', 0.5, 0.6]], peak: 0.28, attack: 0.004, tau: 0.45, release: 0.1, filter: 1600, sweep: 500 },
     horn: { icon: '🎺', parts: [['square', 1, 0.6], ['sawtooth', 1.004, 0.5]], peak: 0.13, attack: 0.06, tau: 0, release: 0.1, filter: 1500 },
   };
+  const MAX_VOICES = 10, liveVoices = []; // key voices still sounding, oldest first
   function startVoice(name, freq) {
+    // a crowd of held notes only turns to mush, so the oldest steps aside for the newest
+    while (liveVoices.length >= MAX_VOICES) liveVoices[0].end(0.03);
     const v = VOICES[name], t = actx.currentTime;
     const g = actx.createGain();
     g.gain.setValueAtTime(0, t);
@@ -132,15 +142,22 @@
       o.connect(og).connect(g); o.start(t);
       return o;
     });
-    return {
-      stop() {
+    let done = false;
+    const voice = {
+      // fade: 0 means the normal release; a number is a quick fade of that many seconds (used when stealing)
+      end(fade) {
+        if (done) return; // stopping twice (a stolen voice whose finger lifts later) is harmless
+        done = true; liveVoices.splice(liveVoices.indexOf(voice), 1);
         const now = actx.currentTime;
         if (g.gain.cancelAndHoldAtTime) g.gain.cancelAndHoldAtTime(now);
         else { g.gain.cancelScheduledValues(now); g.gain.setValueAtTime(g.gain.value, now); }
-        g.gain.setTargetAtTime(0, now, v.release);
-        oscs.forEach(o => o.stop(now + v.release * 8));
+        if (fade) { g.gain.linearRampToValueAtTime(0, now + fade); oscs.forEach(o => o.stop(now + fade + 0.01)); }
+        else { g.gain.setTargetAtTime(0, now, v.release); oscs.forEach(o => o.stop(now + v.release * 8)); }
       },
+      stop() { voice.end(0); },
     };
+    liveVoices.push(voice);
+    return voice;
   }
   function env(g, t, peak, attack, dur) {
     g.gain.setValueAtTime(0.0001, t);
