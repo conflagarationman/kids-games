@@ -212,7 +212,7 @@
   let keys = [], buttons = [];
   const ICON_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
   const SS = 1.3; // sprites are drawn a little oversize so bouncing buttons stay sharp
-  let dpr = 1, staticKeys = null, sbox = null, sprites = {}, dirty = true, wasAnimating = true; // see Drawing
+  let dpr = 1, staticKeys = null, sbox = null, sprites = {}, stickers = new Map(), dirty = true, wasAnimating = true; // see Drawing
   const inset = name => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
   const autoRange = () => (W - 2 * Math.max(12, W * 0.03)) / 15 >= 52 ? 2 : 1;
   function layout() {
@@ -405,6 +405,36 @@
     c.quadraticCurveTo(x + w, y + h, x + w - r, y + h); c.lineTo(x + r, y + h);
     c.quadraticCurveTo(x, y + h, x, y + h - r); c.closePath();
   }
+  // Sticker look shared by all the games: the glyph with a white outline (6% of its size, at least 2px)
+  // and a soft drop shadow, baked into a sprite once per glyph and size bucket (rounded up to 8px).
+  function sticker(glyph, size) {
+    const bucket = Math.ceil(size / 8) * 8, key = glyph + '|' + bucket;
+    let st = stickers.get(key);
+    if (st) return st;
+    const k = dpr * SS, out = Math.max(2, bucket * 0.06), blur = bucket * 0.04, drop = bucket * 0.03;
+    const L = Math.ceil(bucket * 1.3 + 2 * (out + blur * 2 + drop + 2)), px = Math.ceil(L * k);
+    const mk = () => { const c = document.createElement('canvas'); c.width = c.height = px; return c; };
+    const glyphAt = g => {
+      g.setTransform(k, 0, 0, k, px / 2, px / 2);
+      g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#000'; // color emoji take on the fill's transparency
+      g.font = `${bucket}px ${ICON_FONT}`; g.fillText(glyph, 0, 0);
+      g.setTransform(1, 0, 0, 1, 0, 0);
+    };
+    // the glyph's silhouette in white, stamped at 16 offsets around a circle to grow the outline
+    const sil = mk(), sg = sil.getContext('2d');
+    glyphAt(sg); sg.globalCompositeOperation = 'source-in'; sg.fillStyle = '#fff'; sg.fillRect(0, 0, px, px);
+    const ring = mk(), rg = ring.getContext('2d');
+    for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2; rg.drawImage(sil, Math.cos(a) * out * k, Math.sin(a) * out * k); }
+    rg.drawImage(sil, 0, 0);
+    const c = mk(), g = c.getContext('2d');
+    g.shadowColor = 'rgba(43,45,92,.25)'; g.shadowBlur = blur * k; g.shadowOffsetY = drop * k; // one shadow for the whole outline
+    g.drawImage(ring, 0, 0);
+    g.shadowColor = 'transparent';
+    glyphAt(g);
+    st = { img: c, size: L, bucket };
+    stickers.set(key, st);
+    return st;
+  }
   function makeSprite(b, on) {
     const half = Math.ceil(b.r * 1.15 + 16), px = Math.ceil(2 * half * dpr * SS);
     const cv2 = document.createElement('canvas'); cv2.width = cv2.height = px;
@@ -419,16 +449,14 @@
     g.shadowColor = 'transparent';
     if (on && !b.ctrl) { g.lineWidth = Math.max(5, b.r * 0.12); g.strokeStyle = '#ff6fb1'; g.stroke(); }
     if (b.icon) {
-      g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillStyle = '#000'; // color emoji take on the fill's transparency, so keep it solid
-      g.font = `${b.r * 1.1}px ${ICON_FONT}`;
-      g.fillText(b.icon, 0, b.r * 0.06);
+      const fs = b.r * 1.1, st = sticker(b.icon, fs), sz = st.size * fs / st.bucket;
+      g.drawImage(st.img, -sz / 2, b.r * 0.06 - sz / 2, sz, sz);
     }
     return { img: cv2, size: px / (dpr * SS) };
   }
   // Everything built from fonts and shadows lives here, so it can be run again when a font loads.
   function rebuild() {
-    sprites = {};
+    sprites = {}; stickers.clear();
     for (const b of buttons) {
       if (b.ctrl) { sprites[b.id] = makeSprite(b, false); sprites[b.id + ':on'] = makeSprite(b, true); }
       else { sprites[b.id] = makeSprite(b, false); if (!b.pad) sprites[b.id + ':on'] = makeSprite(b, true); }
