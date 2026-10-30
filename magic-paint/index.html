@@ -278,7 +278,7 @@
   }
 
   function paintSegment(s, x, y) {
-    dirty = true;
+    dirty = true; wake();
     const d = Math.hypot(x - s.x, y - s.y), w = brushWidth(), crayon = settings.brushStyle === 'crayon';
     // the rainbow shades through a long jump instead of showing one flat color
     const n = settings.brush === 'rainbow' ? Math.max(1, Math.ceil(d / (unit() * 0.04))) : 1;
@@ -409,6 +409,7 @@
   }
   let warmTimer = 0;
   function drawOutline() {
+    wake(); // a new outline (page, resize, paper) has to be drawn
     outline.width = cv.width; outline.height = cv.height; wall = null; fillPool.length = 0;
     if (!page || !PAGES[page.name]) { labels = boxes = runs = runAt = null; return; }
     const g = octx, S = page.S;
@@ -518,7 +519,7 @@
       pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.globalCompositeOperation = 'destination-over';
       for (let i = bmps.length - 1; i >= 0; i--) { pctx.drawImage(bmps[i], 0, 0); bmps[i].close(); }
       pctx.restore();
-      if (bmps.length) { dirty = true; blank = false; }
+      if (bmps.length) { dirty = true; blank = false; wake(); }
     }).catch(() => { if (visit === visits) { restoring = null; saved.delete(key); } });
   }
   function setPage(name) {
@@ -605,14 +606,14 @@
   }
   function clearPaint() {
     pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.clearRect(0, 0, paint.width, paint.height); pctx.restore();
-    stamps.length = 0; fills.length = 0; dirty = false;
+    stamps.length = 0; fills.length = 0; dirty = false; wake();
   }
 
   // ---------- Input: drag paints, a quick tap stamps (or fills, on a coloring page); every finger counts ----------
   const TAP_MOVE = 12, TAP_MS = 300;
   let blank = true, idle = 0; // a blank page shows a hint finger after a moment
   cv.addEventListener('pointerdown', e => {
-    e.preventDefault(); audio(); blank = false; idle = 0;
+    e.preventDefault(); audio(); wake(); blank = false; idle = 0;
     strokes.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now(), painting: false, travel: 0, color: pick(BRIGHT) });
   });
   cv.addEventListener('pointermove', e => {
@@ -628,6 +629,7 @@
   });
   const lift = e => {
     const s = strokes.get(e.pointerId); if (!s) return;
+    wake();
     strokes.delete(e.pointerId);
     // a short touch that never moved is a stamp; a long still press is a dot of paint
     if (!s.painting && e.type === 'pointerup') {
@@ -714,9 +716,26 @@
       ctx.globalAlpha = 1;
     }
   }
+  // The loop sleeps when nothing is moving, so a finished picture costs no battery. Input and anything that changes the picture wakes it.
+  let running = true, sleptAt = 0, wakeTimer = 0;
+  // a hint finger loops forever once it shows, so that counts as moving
+  const busy = () => strokes.size || sparks.length || stamps.length || fills.length || (blank && idle > 2);
+  function sleep() {
+    running = false; sleptAt = performance.now();
+    // on a page nobody has touched yet the hint is due in a moment: wake just in time for it
+    if (blank && idle <= 2) wakeTimer = setTimeout(wake, (2 - idle) * 1000 + 30);
+  }
+  function wake() {
+    clearTimeout(wakeTimer);
+    if (running) return;
+    const now = performance.now();
+    idle += (now - sleptAt) / 1000; running = true; last = now;
+    requestAnimationFrame(loop);
+  }
   function loop(t) {
     const dt = Math.min(0.05, (t - last) / 1000); last = t;
-    update(dt); draw(); requestAnimationFrame(loop);
+    update(dt); draw();
+    if (busy()) requestAnimationFrame(loop); else sleep();
   }
 
   // ---------- Grown-up panel (press & hold 1.5s) ----------
