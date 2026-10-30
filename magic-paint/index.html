@@ -78,6 +78,11 @@
       <button data-brush="rainbow">🌈 Rainbow</button>
       <button data-brush="crayons">🖍️ Surprise colors</button>
     </div>
+    <div class="label">Brush</div>
+    <div class="modes">
+      <button data-bstyle="smooth">🖌️ Smooth</button>
+      <button data-bstyle="crayon">🖍️ Crayon</button>
+    </div>
     <div class="label">Color buttons for kids</div>
     <div class="modes">
       <button data-palette="show">🎨 Show</button>
@@ -142,7 +147,7 @@
   // ---------- Settings (only settings are saved) ----------
   const KEY = 'magicPaint.kids.v1';
   // brush is 'rainbow', 'crayons' (a surprise color each stroke) or a color the kid picked
-  let settings = { brush: 'rainbow', stamps: 'mix', paper: 'day', sound: true, palette: 'show', size: '1', page: '' };
+  let settings = { brush: 'rainbow', brushStyle: 'smooth', stamps: 'mix', paper: 'day', sound: true, palette: 'show', size: '1', page: '' };
   try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
   const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
   const applyPaper = () => document.body.classList.toggle('night', settings.paper === 'night');
@@ -155,6 +160,8 @@
   function resize() {
     dpr = Math.min(devicePixelRatio || 1, 2);
     W = innerWidth; H = innerHeight;
+    for (const sp of stickers.values()) sp.c.width = 0; // size buckets change with the screen
+    stickers.clear(); stickerBytes = 0;
     // keep the picture when the screen rotates or resizes
     const keep = document.createElement('canvas');
     keep.width = paint.width; keep.height = paint.height;
@@ -172,9 +179,19 @@
   const unit = () => Math.min(W, H);
 
   // ---------- Audio ----------
-  let actx = null;
+  let actx = null, master = null;
   function audio() {
-    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (!actx) {
+      try {
+        actx = new (window.AudioContext || window.webkitAudioContext)();
+        // everything goes through one limiter, so a pile of taps can't clip. The compressor adds about 5.4 dB of makeup gain on its own,
+        // which the master gain takes back off, so a single sound is as loud as it was before the limiter
+        master = actx.createGain(); master.gain.value = 0.54;
+        const lim = actx.createDynamicsCompressor();
+        lim.threshold.value = -12; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25;
+        master.connect(lim); lim.connect(actx.destination);
+      } catch (e) {}
+    }
     if (actx && actx.state === 'suspended') actx.resume();
     return actx;
   }
@@ -187,7 +204,7 @@
     g.gain.setValueAtTime(0.0001, start);
     g.gain.exponentialRampToValueAtTime(vol, start + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-    o.connect(g).connect(a.destination); o.start(start); o.stop(start + dur + 0.02);
+    o.connect(g).connect(master); o.start(start); o.stop(start + dur + 0.02);
   }
   // higher on the screen = higher note
   function brushNote(y) {
@@ -201,7 +218,7 @@
     const o = actx.createOscillator(), g = actx.createGain();
     o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(660, t + 0.09);
     g.gain.setValueAtTime(0.22, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
-    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.16);
+    o.connect(g).connect(master); o.start(t); o.stop(t + 0.16);
     tone(pick(NOTES), t + 0.06, 0.4, 'triangle', 0.12);
   }
   function whooshSound() {
@@ -223,19 +240,86 @@
     return settings.brush === 'crayons' ? s.color : settings.brush;
   }
 
+  // One piece of line: a gradient from the old color to the new one with flat ends. The round join is only ever painted where
+  // there was no paint yet (a wedge on the outside of a turn, a half-circle past the end), because a whole round cap repaints the
+  // older colors behind it and shows as beads where the colors differ.
+  function brushPiece(s, g, x0, y0, x1, y1, c0, c1, w) {
+    const len = Math.hypot(x1 - x0, y1 - y0); if (len < 0.01) return;
+    const ang = Math.atan2(y1 - y0, x1 - x0), r = w / 2;
+    if (s.dir !== undefined) {
+      let turn = ang - s.dir; turn -= Math.round(turn / TAU) * TAU;
+      if (Math.abs(turn) > 0.001) {
+        const side = (turn > 0 ? -1 : 1) * Math.PI / 2;
+        g.fillStyle = c0; g.beginPath(); g.moveTo(x0, y0); g.arc(x0, y0, r, s.dir + side, s.dir + turn + side, turn < 0); g.closePath(); g.fill();
+      }
+    }
+    s.dir = ang;
+    const grad = g.createLinearGradient(x0, y0, x1, y1);
+    grad.addColorStop(0, c0); grad.addColorStop(1, c1);
+    g.save();
+    g.lineWidth = w; g.lineCap = 'butt'; g.strokeStyle = grad;
+    if (night()) { g.shadowColor = c1; g.shadowBlur = w * 0.9; }
+    // each piece starts a pixel back into the last one (same color there), so the soft edges of two flat ends don't leave a hairline
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    g.beginPath(); g.moveTo(x0 - ca, y0 - sa); g.lineTo(x1, y1); g.stroke();
+    g.restore();
+    g.fillStyle = c1; g.beginPath();
+    g.moveTo(x1 + r * sa - ca, y1 - r * ca - sa); g.lineTo(x1 + r * sa, y1 - r * ca);
+    g.arc(x1, y1, r, ang - Math.PI / 2, ang + Math.PI / 2);
+    g.lineTo(x1 - r * sa - ca, y1 + r * ca - sa); g.closePath(); g.fill();
+  }
+
+  // crayon: the same stroke drawn on a scratch canvas, then cut through a fixed paper grain so it looks like wax.
+  // The grain is mostly solid with specks of paper showing, so passing over the same spot twice doesn't build up beads.
+  let scratch = null, grain = null;
+  function crayonGrain() {
+    if (grain) return grain;
+    const N = 128, t = document.createElement('canvas'); t.width = t.height = N;
+    const g = t.getContext('2d'), img = g.createImageData(N, N);
+    const C = 16, coarse = Array.from({ length: C * C }, () => Math.random()); // soft blotches, wrapping at the tile edge
+    const at = (x, y) => coarse[((y % C + C) % C) * C + ((x % C + C) % C)];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const fx = x / (N / C), fy = y / (N / C), ix = Math.floor(fx), iy = Math.floor(fy), u = fx - ix, v = fy - iy;
+      const soft = (at(ix, iy) * (1 - u) + at(ix + 1, iy) * u) * (1 - v) + (at(ix, iy + 1) * (1 - u) + at(ix + 1, iy + 1) * u) * v;
+      const n = soft * 0.45 + Math.random() * 0.55;
+      const a = 0.2 + 0.8 * Math.max(0, Math.min(1, (n - 0.2) / 0.22)), k = (y * N + x) * 4;
+      img.data[k] = img.data[k + 1] = img.data[k + 2] = 255; img.data[k + 3] = a * 255;
+    }
+    g.putImageData(img, 0, 0);
+    return grain = g.createPattern(t, 'repeat');
+  }
+
   function paintSegment(s, x, y) {
-    const d = Math.hypot(x - s.x, y - s.y), c = strokeColor(s, d);
-    pctx.save();
-    pctx.lineCap = pctx.lineJoin = 'round';
-    pctx.lineWidth = brushWidth();
-    pctx.strokeStyle = c;
-    if (night()) { pctx.shadowColor = c; pctx.shadowBlur = brushWidth() * 0.9; }
-    pctx.beginPath(); pctx.moveTo(s.x, s.y);
-    // smooth the line through the midpoint so fast swipes stay round
-    const mx = (s.x + x) / 2, my = (s.y + y) / 2;
-    pctx.quadraticCurveTo(s.x, s.y, mx, my); pctx.lineTo(x, y);
-    pctx.stroke();
-    pctx.restore();
+    dirty = true; wake();
+    const d = Math.hypot(x - s.x, y - s.y), w = brushWidth(), crayon = settings.brushStyle === 'crayon';
+    // the rainbow shades through a long jump instead of showing one flat color
+    const n = settings.brush === 'rainbow' ? Math.max(1, Math.ceil(d / (unit() * 0.04))) : 1;
+    let g = pctx, bx = 0, by = 0, bw = 0, bh = 0;
+    if (crayon) {
+      const pad = w * 1.5;
+      bx = Math.max(0, Math.floor((Math.min(s.x, x) - pad) * dpr)); by = Math.max(0, Math.floor((Math.min(s.y, y) - pad) * dpr));
+      bw = Math.min(paint.width, Math.ceil((Math.max(s.x, x) + pad) * dpr)) - bx; bh = Math.min(paint.height, Math.ceil((Math.max(s.y, y) + pad) * dpr)) - by;
+      if (!scratch) scratch = document.createElement('canvas');
+      if (scratch.width < bw || scratch.height < bh) { scratch.width = Math.max(scratch.width, bw); scratch.height = Math.max(scratch.height, bh); }
+      g = scratch.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, scratch.width, scratch.height);
+      g.setTransform(dpr, 0, 0, dpr, -bx, -by);
+    }
+    let px = s.x, py = s.y, pc = s.c || strokeColor(s, 0), c = pc;
+    if (!s.c) { // round start: just the half circle behind the first piece
+      const a0 = Math.atan2(y - s.y, x - s.x); g.fillStyle = pc; g.beginPath(); g.arc(px, py, w / 2, a0 + Math.PI / 2, a0 + Math.PI * 1.5); g.closePath(); g.fill();
+    }
+    for (let k = 1; k <= n; k++) {
+      const qx = s.x + (x - s.x) * k / n, qy = s.y + (y - s.y) * k / n;
+      c = strokeColor(s, d / n);
+      brushPiece(s, g, px, py, qx, qy, pc, c, w);
+      px = qx; py = qy; pc = c;
+    }
+    s.c = c;
+    if (crayon) {
+      const pat = crayonGrain(); pat.setTransform(new DOMMatrix().translate(-bx, -by));
+      g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-in'; g.fillStyle = pat; g.fillRect(0, 0, bw, bh); g.globalCompositeOperation = 'source-over';
+      pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.drawImage(scratch, 0, 0, bw, bh, bx, by, bw, bh); pctx.restore();
+    }
     s.travel += d;
     s.x = x; s.y = y;
     if (s.travel > unit() * 0.09) { s.travel = 0; brushNote(y); }
@@ -243,8 +327,9 @@
   }
 
   function addStamp(x, y) {
+    dirty = true;
     stampSound();
-    stamps.push({ x, y, glyph: pick(STAMPS[settings.stamps] || STAMPS.mix), t: 0, size: unit() * (0.11 + Math.random() * 0.05), rot: (Math.random() - 0.5) * 0.5 });
+    stamps.push({ x, y, glyph: pick(STAMPS[settings.stamps] || STAMPS.mix), t: 0, size: unit() * (0.11 + Math.random() * (STAMP_MAX - 0.11)), rot: (Math.random() - 0.5) * 0.5 });
     burst(x, y, 12, unit() * 0.3);
   }
 
@@ -255,11 +340,44 @@
     }
   }
 
+  // ---------- Sticker emoji ----------
+  // Same look as the other games: the emoji with a white outline (its silhouette stamped in white at 16 points around a circle)
+  // and a soft shadow. One master sprite per glyph, made at the biggest size a stamp is ever drawn (including the 1.3x pop-in)
+  // and only ever scaled down, so there is nothing to cache per size. Page-sized canvases are what crash iPad Safari, so the
+  // sprites share a memory budget and the least recently used one goes first (it is simply drawn again if it comes back).
+  const STAMP_MAX = 0.16, POP = 1.3, STICKER_BUDGET = 14 * 1024 * 1024; // STAMP_MAX: biggest stamp size, as a share of unit()
+  const stickers = new Map(); // glyph -> { c, em, side, bytes }; a Map keeps insertion order, so the oldest-used one is first
+  let stickerBytes = 0;
+  function sticker(glyph) {
+    let sp = stickers.get(glyph);
+    if (sp) { stickers.delete(glyph); stickers.set(glyph, sp); return sp; }
+    const em = Math.ceil(unit() * STAMP_MAX * POP * dpr / 8) * 8;
+    const o = Math.max(2, em * 0.06), pad = Math.ceil(o + em * 0.08), side = Math.ceil(em * 1.2) + pad * 2, mid = side / 2;
+    const mk = () => { const c = document.createElement('canvas'); c.width = c.height = side; return c; };
+    const glyphAt = g => { g.font = `${em}px ${EMOJI}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#000'; g.fillText(glyph, mid, mid); }; // black first: keeps emoji fully opaque
+    const sil = mk(), sg = sil.getContext('2d');
+    glyphAt(sg); sg.globalCompositeOperation = 'source-in'; sg.fillStyle = '#fff'; sg.fillRect(0, 0, side, side);
+    const ring = mk(), rg = ring.getContext('2d');
+    // the silhouette only fills the middle of the sprite, so only that part is copied
+    const gb = side - pad * 2;
+    for (let i = 0; i < 16; i++) { const a = i / 16 * TAU; rg.drawImage(sil, pad, pad, gb, gb, pad + Math.cos(a) * o, pad + Math.sin(a) * o, gb, gb); }
+    rg.drawImage(sil, pad, pad, gb, gb, pad, pad, gb, gb);
+    const c = mk(), g = c.getContext('2d');
+    g.shadowColor = 'rgba(43,45,92,.25)'; g.shadowOffsetY = em * 0.03; g.shadowBlur = em * 0.04;
+    g.drawImage(ring, 0, 0);
+    g.shadowColor = 'transparent'; g.shadowBlur = g.shadowOffsetY = 0;
+    glyphAt(g);
+    sil.width = ring.width = 0; // the two helpers are not needed again
+    sp = { c, em, side, bytes: side * side * 4 };
+    stickers.set(glyph, sp); stickerBytes += sp.bytes;
+    while (stickerBytes > STICKER_BUDGET && stickers.size > 1) { const old = stickers.keys().next().value, o2 = stickers.get(old); o2.c.width = 0; stickerBytes -= o2.bytes; stickers.delete(old); }
+    return sp;
+  }
   function drawStamp(g, s, scale) {
+    const sp = sticker(s.glyph), w = sp.side * s.size * scale / sp.em; // the sprite's size on screen, in css px
     g.save(); g.translate(s.x, s.y); g.rotate(s.rot);
-    g.font = `${s.size * scale}px ${EMOJI}`;
-    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#000'; // keep emoji fully opaque
-    g.fillText(s.glyph, 0, s.size * 0.06);
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(sp.c, -w / 2, -w / 2 + s.size * 0.06, w, w);
     g.restore();
   }
 
@@ -314,6 +432,7 @@
   const PAGE_ORDER = ['', ...Object.keys(PAGES)];
   const outline = document.createElement('canvas'), octx = outline.getContext('2d');
   let page = null, wall = null, lineW = 0; // page: { name, cx, cy, S }; wall: 1 where a line is; lineW in device px
+  let labels = null, boxes = null, runs = null, runAt = null; // labels: region id per pixel (0 on a line); boxes: x0,y0,x1,y1 per id; runs: x,y,len of each horizontal span, runAt[id] where a region's start. labels null = too many regions, flood fill instead
   const fills = [];
   function pageBox() {
     // keep clear of the kid color buttons: a column on the left when tall, a row on top when wide, plus the picture strip
@@ -333,9 +452,11 @@
       a: shape((x, y, r, a0, a1) => g.arc(x, y, r, a0, a1)),
     });
   }
+  let warmTimer = 0;
   function drawOutline() {
-    outline.width = cv.width; outline.height = cv.height; wall = null;
-    if (!page || !PAGES[page.name]) return;
+    wake(); // a new outline (page, resize, paper) has to be drawn
+    outline.width = cv.width; outline.height = cv.height; wall = null; for (const c of fillPool) c.width = 0; fillPool.length = 0;
+    if (!page || !PAGES[page.name]) { labels = boxes = runs = runAt = null; return; }
     const g = octx, S = page.S;
     g.setTransform(dpr * S, 0, 0, dpr * S, dpr * page.cx, dpr * page.cy);
     lineW = Math.max(5, S * 0.035) * dpr;
@@ -344,18 +465,150 @@
     drawLines(g, page.name);
     g.setTransform(1, 0, 0, 1, 0, 0);
     const d = g.getImageData(0, 0, outline.width, outline.height).data;
-    wall = new Uint8Array(outline.width * outline.height);
-    for (let i = 0, j = 3; i < wall.length; i++, j += 4) wall[i] = d[j] > 90 ? 1 : 0;
+    labelRegions(d, outline.width, outline.height);
+    // warm one fill canvas a moment later, so the first tap on a page doesn't pay for the big allocation (and the page switch doesn't)
+    clearTimeout(warmTimer); warmTimer = setTimeout(() => {
+      if (fillPool.length || !wall) return;
+      const c = takeFillCanvas(outline.width, outline.height), cx = c.getContext('2d'); cx.fillRect(0, 0, 1, 1); cx.clearRect(0, 0, 1, 1); fillPool.push(c);
+    }, 400);
+  }
+  // builds wall and numbers every open area once per page, so a tap is a lookup instead of a flood fill.
+  // One pass cuts each row into open runs, neighbouring rows' runs that touch are joined (union-find), then each run is labeled
+  function labelRegions(d, w, h) {
+    labels = boxes = runs = runAt = null;
+    wall = new Uint8Array(w * h);
+    let rs = new Int32Array(3 * 4096), rn = 0;
+    const rowAt = new Int32Array(h + 1);
+    const add = (x, y, len) => { if (rn * 3 === rs.length) { const g = new Int32Array(rs.length * 2); g.set(rs); rs = g; } rs[rn * 3] = x; rs[rn * 3 + 1] = y; rs[rn * 3 + 2] = len; rn++; };
+    for (let y = 0, i = 0, j = 3; y < h; y++) {
+      rowAt[y] = rn;
+      let start = -1;
+      for (let x = 0; x < w; x++, i++, j += 4) {
+        if (d[j] > 90) { wall[i] = 1; if (start >= 0) { add(start, y, x - start); start = -1; } }
+        else if (start < 0) start = x;
+      }
+      if (start >= 0) add(start, y, w - start);
+    }
+    rowAt[h] = rn;
+    const parent = new Int32Array(rn);
+    for (let i = 0; i < rn; i++) parent[i] = i;
+    const find = i => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+    for (let y = 1; y < h; y++) {
+      let a = rowAt[y - 1], b = rowAt[y]; const ae = b, be = rowAt[y + 1];
+      while (a < ae && b < be) {
+        const ax1 = rs[a * 3] + rs[a * 3 + 2], bx1 = rs[b * 3] + rs[b * 3 + 2];
+        if (rs[a * 3] < bx1 && rs[b * 3] < ax1) { const ra = find(a), rb = find(b); if (ra !== rb) parent[rb] = ra; }
+        if (ax1 < bx1) a++; else b++;
+      }
+    }
+    const idOf = new Int32Array(rn), runId = new Int32Array(rn);
+    let n = 0;
+    for (let i = 0; i < rn; i++) {
+      const r = find(i);
+      if (!idOf[r]) { if (++n > 65535) return; idOf[r] = n; } // too many areas: fall back to the flood fill
+      runId[i] = idOf[r];
+    }
+    // group each region's runs together, and fill the label map a run at a time
+    const at = new Uint32Array(n + 2), bb = new Int32Array((n + 1) * 4);
+    for (let i = 0; i < rn; i++) at[runId[i] + 1]++;
+    for (let k = 1; k <= n + 1; k++) at[k] += at[k - 1];
+    const pos = at.slice(), sorted = new Int32Array(rn * 3), lab = new Uint16Array(w * h);
+    for (let id = 1; id <= n; id++) { bb[id * 4] = w; bb[id * 4 + 1] = h; bb[id * 4 + 2] = 0; bb[id * 4 + 3] = 0; }
+    for (let i = 0; i < rn; i++) {
+      const id = runId[i], k = pos[id]++, x = rs[i * 3], y = rs[i * 3 + 1], len = rs[i * 3 + 2];
+      sorted[k * 3] = x; sorted[k * 3 + 1] = y; sorted[k * 3 + 2] = len;
+      lab.fill(id, y * w + x, y * w + x + len);
+      if (x < bb[id * 4]) bb[id * 4] = x; if (y < bb[id * 4 + 1]) bb[id * 4 + 1] = y;
+      if (x + len - 1 > bb[id * 4 + 2]) bb[id * 4 + 2] = x + len - 1; if (y > bb[id * 4 + 3]) bb[id * 4 + 3] = y;
+    }
+    labels = lab; boxes = bb; runs = sorted; runAt = at;
+  }
+  // ---------- Each page keeps its own painting (in memory only) ----------
+  // Leaving a page snapshots the paint layer to a small PNG blob (full-size canvases per page would be too much memory on a big iPad).
+  // An entry is { box, blobs: [Promise<Blob>] }; toBlob copies the bitmap right away, so clearing straight after is safe, and
+  // a promise lets a quick switch back wait for the encode instead of finding nothing.
+  const saved = new Map(); // page name ('' = blank paper) -> entry
+  let dirty = false, visits = 0, restoring = null; // dirty: the paint layer has something on it; restoring: name of the page whose snapshot is still loading, or null
+  const sameBox = (a, b) => !a && !b || a && b && Math.abs(a.cx - b.cx) < 0.01 && Math.abs(a.cy - b.cy) < 0.01 && Math.abs(a.S - b.S) < 0.01;
+  const boxOf = () => page ? { cx: page.cx, cy: page.cy, S: page.S } : null;
+  function bakeAll() {
+    // stamps and fills still animating are part of the picture
+    for (const s of stamps) drawStamp(pctx, s, 1);
+    for (const f of fills) { pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.drawImage(f.fc, f.x0, f.y0, f.fw, f.fh, f.x0, f.y0, f.fw, f.fh); pctx.restore(); giveFillCanvas(f); }
+    stamps.length = 0; fills.length = 0;
+  }
+  function leavePage() {
+    const key = settings.page, e = saved.get(key);
+    if (restoring === key) {
+      // the page's old snapshot hasn't been drawn back yet: keep it, and add anything painted since as a layer on top
+      if (dirty) { bakeAll(); e.blobs.push(new Promise(res => paint.toBlob(res, 'image/png'))); }
+      return;
+    }
+    if (!dirty) { saved.delete(key); return; }
+    bakeAll();
+    saved.set(key, { box: boxOf(), blobs: [new Promise(res => paint.toBlob(res, 'image/png'))] });
+  }
+  function restorePage() {
+    const key = settings.page, e = saved.get(key);
+    if (!e) return;
+    if (!sameBox(e.box, boxOf())) { saved.delete(key); return; } // the screen changed shape and the page moved: that painting no longer lines up
+    const visit = visits; restoring = key;
+    Promise.all(e.blobs).then(bs => Promise.all(bs.filter(Boolean).map(b => createImageBitmap(b)))).then(bmps => {
+      // the kid moved on to another page meanwhile: leave the snapshot saved for next time
+      if (visit !== visits) { bmps.forEach(b => b.close()); return; }
+      restoring = null;
+      if (saved.get(key) !== e) { bmps.forEach(b => b.close()); return; } // cleared meanwhile
+      saved.delete(key);
+      if (!sameBox(e.box, boxOf())) { bmps.forEach(b => b.close()); return; } // resized meanwhile
+      // draw underneath whatever has been painted in the meantime, oldest layer lowest
+      pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.globalCompositeOperation = 'destination-over';
+      for (let i = bmps.length - 1; i >= 0; i--) { pctx.drawImage(bmps[i], 0, 0); bmps[i].close(); }
+      pctx.restore();
+      if (bmps.length) { dirty = true; blank = false; wake(); }
+    }).catch(() => { if (visit === visits) { restoring = null; saved.delete(key); } });
   }
   function setPage(name) {
+    name = name || '';
+    if (name === settings.page) return; // already here: keep the painting
+    leavePage(); restoring = null; visits++;
     clearPaint();
-    settings.page = name || ''; saveSettings();
-    page = settings.page ? { name: settings.page, ...pageBox() } : null;
+    settings.page = name; saveSettings();
+    page = name ? { name, ...pageBox() } : null;
     drawOutline(); blank = true; idle = 0; syncPages();
+    restorePage();
   }
   // flood-fill the open area under the finger, then pour it in from that spot
   const rgbOf = (() => { const c = document.createElement('canvas').getContext('2d', { willReadFrequently: true }); c.canvas.width = c.canvas.height = 1;
     return css => { c.clearRect(0, 0, 1, 1); c.fillStyle = css; c.fillRect(0, 0, 1, 1); return c.getImageData(0, 0, 1, 1).data; }; })();
+  // fill canvases are page-sized and a fresh one per tap makes a big allocation, so one is kept and reused (cleared by box when done)
+  const fillPool = [];
+  function takeFillCanvas(w, h) {
+    const c = fillPool.pop();
+    if (c && c.width === w && c.height === h) return c;
+    const n = document.createElement('canvas'); n.width = w; n.height = h; return n;
+  }
+  function giveFillCanvas(f) {
+    f.fc.getContext('2d').clearRect(f.x0, f.y0, f.fw, f.fh);
+    if (fillPool.length < 1) fillPool.push(f.fc); else f.fc.width = 0; // one idle page-sized canvas is plenty; free the rest
+  }
+  const regionBox = id => [boxes[id * 4], boxes[id * 4 + 1], boxes[id * 4 + 2], boxes[id * 4 + 3]];
+  // the old way, for pages with more than 65535 open areas: flood from the tap, leaving the result in floodMask
+  let floodMask = null;
+  function floodBox(px, py) {
+    const w = outline.width, h = outline.height, mask = new Uint8Array(w * h), stack = new Int32Array(w * h);
+    let sp = 0, x0 = px, x1 = px, y0 = py, y1 = py;
+    stack[sp++] = py * w + px; mask[py * w + px] = 1;
+    while (sp) {
+      const i = stack[--sp], ix = i % w, iy = (i - ix) / w;
+      if (ix < x0) x0 = ix; if (ix > x1) x1 = ix; if (iy < y0) y0 = iy; if (iy > y1) y1 = iy;
+      if (ix > 0 && !mask[i - 1] && !wall[i - 1]) { mask[i - 1] = 1; stack[sp++] = i - 1; }
+      if (ix < w - 1 && !mask[i + 1] && !wall[i + 1]) { mask[i + 1] = 1; stack[sp++] = i + 1; }
+      if (iy > 0 && !mask[i - w] && !wall[i - w]) { mask[i - w] = 1; stack[sp++] = i - w; }
+      if (iy < h - 1 && !mask[i + w] && !wall[i + w]) { mask[i + w] = 1; stack[sp++] = i + w; }
+    }
+    floodMask = mask;
+    return [x0, y0, x1, y1];
+  }
   function fillAt(x, y, css) {
     if (!wall) return false;
     const w = outline.width, h = outline.height;
@@ -370,26 +623,24 @@
       }
       if (!ok) return false;
     }
-    const mask = new Uint8Array(w * h), stack = new Int32Array(w * h);
-    let sp = 0, x0 = px, x1 = px, y0 = py, y1 = py;
-    stack[sp++] = py * w + px; mask[py * w + px] = 1;
-    while (sp) {
-      const i = stack[--sp], ix = i % w, iy = (i - ix) / w;
-      if (ix < x0) x0 = ix; if (ix > x1) x1 = ix; if (iy < y0) y0 = iy; if (iy > y1) y1 = iy;
-      if (ix > 0 && !mask[i - 1] && !wall[i - 1]) { mask[i - 1] = 1; stack[sp++] = i - 1; }
-      if (ix < w - 1 && !mask[i + 1] && !wall[i + 1]) { mask[i + 1] = 1; stack[sp++] = i + 1; }
-      if (iy > 0 && !mask[i - w] && !wall[i - w]) { mask[i - w] = 1; stack[sp++] = i - w; }
-      if (iy < h - 1 && !mask[i + w] && !wall[i + w]) { mask[i + w] = 1; stack[sp++] = i + w; }
+    const [x0, y0, x1, y1] = labels ? regionBox(labels[py * w + px]) : floodBox(px, py);
+    const fw = x1 - x0 + 1, fh = y1 - y0 + 1, fc = takeFillCanvas(w, h);
+    const fx = fc.getContext('2d');
+    if (labels) {
+      // draw the region's runs: the work follows its outline, not its area, so the big background is as quick as a small shape
+      const id = labels[py * w + px];
+      fx.fillStyle = css; fx.beginPath();
+      for (let k = runAt[id], e = runAt[id + 1]; k < e; k++) fx.rect(runs[k * 3], runs[k * 3 + 1], runs[k * 3 + 2], 1);
+      fx.fill();
+    } else {
+      const img = fx.createImageData(fw, fh), [r, g, b] = rgbOf(css);
+      const px4 = new Uint8Array([r, g, b, 255]), packed = new Uint32Array(px4.buffer)[0], out = new Uint32Array(img.data.buffer);
+      for (let yy = 0; yy < fh; yy++) for (let xx = 0; xx < fw; xx++) if (floodMask[(yy + y0) * w + xx + x0]) out[yy * fw + xx] = packed;
+      floodMask = null;
+      fx.putImageData(img, x0, y0);
     }
-    const fw = x1 - x0 + 1, fh = y1 - y0 + 1, fc = document.createElement('canvas'); fc.width = fw; fc.height = fh;
-    const fx = fc.getContext('2d'), img = fx.createImageData(fw, fh), [r, g, b] = rgbOf(css);
-    for (let yy = 0; yy < fh; yy++) for (let xx = 0; xx < fw; xx++) {
-      if (!mask[(yy + y0) * w + xx + x0]) continue;
-      const k = (yy * fw + xx) * 4; img.data[k] = r; img.data[k + 1] = g; img.data[k + 2] = b; img.data[k + 3] = 255;
-    }
-    fx.putImageData(img, 0, 0);
     const far = Math.hypot(Math.max(px - x0, x1 - px), Math.max(py - y0, y1 - py)); // farthest corner
-    fills.push({ fc, x0, y0, px, py, far, t: 0 });
+    fills.push({ fc, x0, y0, fw, fh, px, py, far, t: 0 }); dirty = true;
     pourSound();
     burst(x, y, 10, unit() * 0.25, css);
     return true;
@@ -400,14 +651,14 @@
   }
   function clearPaint() {
     pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.clearRect(0, 0, paint.width, paint.height); pctx.restore();
-    stamps.length = 0; fills.length = 0;
+    stamps.length = 0; fills.length = 0; dirty = false; wake();
   }
 
   // ---------- Input: drag paints, a quick tap stamps (or fills, on a coloring page); every finger counts ----------
   const TAP_MOVE = 12, TAP_MS = 300;
   let blank = true, idle = 0; // a blank page shows a hint finger after a moment
   cv.addEventListener('pointerdown', e => {
-    e.preventDefault(); audio(); blank = false; idle = 0;
+    e.preventDefault(); audio(); wake(); blank = false; idle = 0;
     strokes.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now(), painting: false, travel: 0, color: pick(BRIGHT) });
   });
   cv.addEventListener('pointermove', e => {
@@ -423,6 +674,7 @@
   });
   const lift = e => {
     const s = strokes.get(e.pointerId); if (!s) return;
+    wake();
     strokes.delete(e.pointerId);
     // a short touch that never moved is a stamp; a long still press is a dot of paint
     if (!s.painting && e.type === 'pointerup') {
@@ -450,7 +702,7 @@
     idle += dt;
     for (let i = fills.length - 1; i >= 0; i--) {
       const f = fills[i]; f.t += dt;
-      if (f.t > 0.35) { pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.drawImage(f.fc, f.x0, f.y0); pctx.restore(); fills.splice(i, 1); }
+      if (f.t > 0.35) { pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.drawImage(f.fc, f.x0, f.y0, f.fw, f.fh, f.x0, f.y0, f.fw, f.fh); pctx.restore(); giveFillCanvas(f); fills.splice(i, 1); }
     }
     if (blank && idle > 2 && !page) {
       hintT += dt * 1.6;
@@ -474,7 +726,7 @@
     for (const f of fills) {
       // the color pours out from the finger
       const k = Math.min(1, f.t / 0.35), r = f.far * (1 - (1 - k) * (1 - k)) + 2;
-      ctx.save(); ctx.beginPath(); ctx.arc(f.px, f.py, r, 0, TAU); ctx.clip(); ctx.drawImage(f.fc, f.x0, f.y0); ctx.restore();
+      ctx.save(); ctx.beginPath(); ctx.arc(f.px, f.py, r, 0, TAU); ctx.clip(); ctx.drawImage(f.fc, f.x0, f.y0, f.fw, f.fh, f.x0, f.y0, f.fw, f.fh); ctx.restore();
     }
     if (page) ctx.drawImage(outline, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -509,9 +761,27 @@
       ctx.globalAlpha = 1;
     }
   }
+  // The loop sleeps when nothing is moving, so a finished picture costs no battery. Input and anything that changes the picture wakes it.
+  let running = true, sleptAt = 0, wakeTimer = 0;
+  // a hint finger loops forever once it shows, so that counts as moving
+  const busy = () => strokes.size || sparks.length || stamps.length || fills.length || (blank && idle > 2);
+  function sleep() {
+    running = false; sleptAt = performance.now();
+    // on a page nobody has touched yet the hint is due in a moment: wake just in time for it
+    if (blank && idle <= 2) wakeTimer = setTimeout(wake, (2 - idle) * 1000 + 30);
+  }
+  function wake() {
+    clearTimeout(wakeTimer);
+    if (running) return;
+    const now = performance.now();
+    idle += (now - sleptAt) / 1000; running = true; last = now;
+    requestAnimationFrame(loop);
+  }
   function loop(t) {
-    const dt = Math.min(0.05, (t - last) / 1000); last = t;
-    update(dt); draw(); requestAnimationFrame(loop);
+    // a frame queued before wake() can carry an older timestamp than `last`, so dt must not go negative
+    const dt = Math.max(0, Math.min(0.05, (t - last) / 1000)); last = t;
+    update(dt); draw();
+    if (busy()) requestAnimationFrame(loop); else sleep();
   }
 
   // ---------- Grown-up panel (press & hold 1.5s) ----------
@@ -526,10 +796,12 @@
   function syncPanel() {
     for (const k of ['brush', 'stamps', 'paper', 'palette', 'size', 'page'])
       document.querySelectorAll(`#panel [data-${k}]`).forEach(b => b.classList.toggle('on', b.dataset[k] === settings[k]));
+    document.querySelectorAll('#panel [data-bstyle]').forEach(b => b.classList.toggle('on', b.dataset.bstyle === (settings.brushStyle === 'crayon' ? 'crayon' : 'smooth')));
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
   }
   for (const k of ['brush', 'stamps', 'paper', 'palette', 'size'])
     document.querySelectorAll(`#panel [data-${k}]`).forEach(b => b.onclick = () => { settings[k] = b.dataset[k]; saveSettings(); applyPaper(); syncPanel(); syncPalette(); if (k === 'paper') drawOutline(); });
+  document.querySelectorAll('#panel [data-bstyle]').forEach(b => b.onclick = () => { settings.brushStyle = b.dataset.bstyle; saveSettings(); syncPanel(); });
   document.querySelectorAll('#panel [data-page]').forEach(b => b.onclick = () => { setPage(b.dataset.page); syncPanel(); });
 
   // ---------- Kid color buttons ----------
@@ -579,7 +851,7 @@
   addEventListener('resize', syncPages);
   syncPalette();
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
-  document.getElementById('tClear').onclick = () => { clearPaint(); whooshSound(); blank = true; idle = 0; };
+  document.getElementById('tClear').onclick = () => { clearPaint(); saved.delete(settings.page); restoring = null; whooshSound(); blank = true; idle = 0; }; // this page only
   document.getElementById('tSave').onclick = () => {
     // flatten onto the paper color so the saved picture looks like the screen
     const out = document.createElement('canvas'); out.width = paint.width; out.height = paint.height;
@@ -604,6 +876,16 @@
   };
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
 
+  // ?debug: a read-only look at what is held in memory
+  if (/[?&]debug/.test(location.search)) window.__magicPaint = async () => {
+    const sizes = []; for (const e of saved.values()) for (const b of await Promise.all(e.blobs)) if (b) sizes.push(b.size);
+    const px = cv.width * cv.height * 4;
+    return { canvasMB: +(3 * px / 1048576).toFixed(1), // main, paint and outline layers
+      stickerCount: stickers.size, stickerMB: +(stickerBytes / 1048576).toFixed(1),
+      fillPoolCanvases: fillPool.length, fillPoolMB: +(fillPool.length * px / 1048576).toFixed(1), fillsInFlight: fills.length,
+      regionMapMB: +(((labels ? labels.byteLength : 0) + (wall ? wall.byteLength : 0) + (runs ? runs.byteLength : 0) + (boxes ? boxes.byteLength : 0) + (runAt ? runAt.byteLength : 0)) / 1048576).toFixed(1),
+      savedPages: saved.size, savedKB: +(sizes.reduce((a, b) => a + b, 0) / 1024).toFixed(1) };
+  };
   resize();
   if (settings.page && PAGES[settings.page]) { page = { name: settings.page, ...pageBox() }; drawOutline(); }
   syncPages();
