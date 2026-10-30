@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bible Verses</title>
+<meta name="theme-color" content="#ffd9a8">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; color: #2b2d5c; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+  body { background: linear-gradient(180deg, #ffd9a8 0%, #ffc6e5 55%, #c9b8ff 100%); }
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    padding: calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+
+  /* reference pill and the two big kid buttons, along the top (the bottom edge stays clear for wrists) */
+  #top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  #ref { padding: 8px 18px; border-radius: 999px; background: #fff; font-weight: 900; font-size: clamp(18px, 3.4vmin, 28px); box-shadow: 0 3px 10px rgba(43,45,92,.18); }
+  .big { width: clamp(64px, 11vmin, 92px); height: clamp(64px, 11vmin, 92px); border-radius: 50%; border: 5px solid #fff; font-size: clamp(28px, 5vmin, 42px);
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(43,45,92,.25); transition: transform .15s; touch-action: none; padding: 0; }
+  .big:active { transform: scale(.92); }
+  #listen { background: #2f7bff; color: #fff; }
+  #turn { background: #22b84a; color: #fff; }
+  .big.on { transform: scale(1.12); box-shadow: 0 0 0 5px #2b2d5c, 0 4px 14px rgba(43,45,92,.25); }
+
+  /* the verse: one row per phrase, a picture then word chips that light up */
+  #verse { flex: 1; width: min(100%, 1100px); display: flex; flex-direction: column; justify-content: center; gap: clamp(6px, 1.6vmin, 14px); padding: 10px 0; }
+  .phrase { display: flex; align-items: flex-start; gap: clamp(6px, 1.4vmin, 12px); }
+  /* words wrap under each other, not under the picture; one line per phrase when the text can stay big */
+  .ws { display: flex; flex-wrap: wrap; gap: clamp(6px, 1.4vmin, 12px); }
+  #verse.one .ws { flex-wrap: nowrap; }
+  .pic { font-size: var(--fs); line-height: 1.35; width: calc(var(--fs) * 1.35); text-align: center; flex: none; transition: transform .3s; filter: saturate(.55) opacity(.6); }
+  .phrase.lit .pic { filter: none; transform: scale(1.15); }
+  .w { font-family: "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; font-weight: 900; font-size: var(--fs); line-height: 1.15; padding: .08em .28em; border-radius: .35em;
+    color: rgba(43,45,92,.38); background: rgba(255,255,255,.45); transition: color .2s, background .2s, transform .2s; }
+  .w.lit { color: #fff; background: var(--c); transform: translateY(-2px); box-shadow: 0 3px 8px rgba(43,45,92,.2); }
+  .w.now { transform: scale(1.12) translateY(-3px); }
+  .w.next { color: #2b2d5c; background: #fff; box-shadow: 0 0 0 4px #ffd23f; animation: bob 1s ease-in-out infinite; }
+  @keyframes bob { 50% { transform: translateY(-4px); } }
+
+  #hint { min-height: 1.4em; font-weight: 800; font-size: clamp(14px, 2.6vmin, 20px); opacity: .7; text-align: center; }
+  #credit { font-size: 10px; line-height: 1.3; opacity: .55; text-align: center; max-width: 640px; margin-top: 4px; }
+  #confetti { position: fixed; inset: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="top">
+    <button class="big" id="listen" aria-label="Listen">▶</button>
+    <div id="ref">John 3:16</div>
+    <button class="big" id="turn" aria-label="Your turn">👆</button>
+  </div>
+  <div id="verse"></div>
+  <div id="hint">Tap ▶ to listen, or 👆 for your turn</div>
+  <div id="credit">Scripture quotations taken from The Holy Bible, New International Version® NIV®. Copyright © 1973, 1978, 1984, 2011 by Biblica, Inc.™ Used by permission. All rights reserved worldwide.</div>
+</div>
+<canvas id="confetti"></canvas>
+
+<script>
+(() => {
+  // ---------- Verses (add more here later) ----------
+  // Each phrase gets one picture, so pre-readers can follow along.
+  const VERSES = [
+    { ref: 'John 3:16', say: 'John three sixteen', phrases: [
+      ['❤️', 'For God so loved'],
+      ['🌍', 'the world'],
+      ['🎁', 'that he gave'],
+      ['👶', 'his one and only Son,'],
+      ['🙏', 'that whoever believes in him'],
+      ['🤗', 'shall not perish'],
+      ['✨', 'but have eternal life.'],
+    ] },
+  ];
+  const BRIGHT = ['#ff3b3b', '#ff9a1f', '#f5c800', '#22b84a', '#2f7bff', '#a04dff', '#ff4fb0'];
+  const verse = VERSES[0];
+
+  // ---------- Layout ----------
+  const verseEl = document.getElementById('verse'), hint = document.getElementById('hint');
+  const words = []; // { el, phrase, text, start } in reading order; start = char index in the spoken text
+  let spoken = '';
+  verse.phrases.forEach(([pic, text], pi) => {
+    const row = document.createElement('div'); row.className = 'phrase';
+    row.innerHTML = `<span class="pic">${pic}</span><span class="ws"></span>`;
+    const ws = row.lastChild;
+    text.split(' ').forEach(t => {
+      const el = document.createElement('span'); el.className = 'w'; el.textContent = t;
+      el.style.setProperty('--c', BRIGHT[pi % BRIGHT.length]);
+      ws.appendChild(el);
+      words.push({ el, row, text: t, start: spoken.length });
+      spoken += t + ' ';
+    });
+    verseEl.appendChild(row);
+  });
+  // biggest font that fits every phrase on the screen: one line per phrase if that stays big, else let phrases wrap
+  function fitSize() {
+    const box = verseEl.getBoundingClientRect();
+    let lo = 14, hi = 90;
+    for (let i = 0; i < 12; i++) {
+      const mid = (lo + hi) / 2;
+      verseEl.style.setProperty('--fs', mid + 'px');
+      verseEl.scrollHeight <= box.height + 1 && verseEl.scrollWidth <= box.width + 1 ? lo = mid : hi = mid;
+    }
+    verseEl.style.setProperty('--fs', lo + 'px');
+    return lo;
+  }
+  function fit() {
+    verseEl.classList.add('one');
+    if (fitSize() >= 28) return;
+    verseEl.classList.remove('one');
+    fitSize();
+  }
+  addEventListener('resize', fit); fit();
+
+  // ---------- Lighting ----------
+  function clear() { words.forEach(w => w.el.classList.remove('lit', 'now', 'next')); document.querySelectorAll('.phrase').forEach(r => r.classList.remove('lit')); }
+  function light(i) {
+    words.forEach((w, j) => w.el.classList.toggle('now', j === i));
+    if (i < 0 || i >= words.length) return;
+    words[i].el.classList.add('lit'); words[i].row.classList.add('lit');
+  }
+
+  // ---------- Voice: the device's own reader, slow and warm ----------
+  // speechSynthesis runs on the device: nothing is sent anywhere, and it works offline.
+  let voice = null;
+  function pickVoice() {
+    const vs = speechSynthesis.getVoices().filter(v => /^en(-|_)/i.test(v.lang));
+    voice = vs.find(v => /Samantha|Karen|Moira|Ava|Allison|Google US English/i.test(v.name)) || vs.find(v => /en-US/i.test(v.lang)) || vs[0] || null;
+  }
+  if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+  function utter(text, rate) {
+    const u = new SpeechSynthesisUtterance(text);
+    if (voice) u.voice = voice;
+    u.rate = rate; u.pitch = 1.05;
+    return u;
+  }
+  function stopVoice() { if ('speechSynthesis' in window) speechSynthesis.cancel(); }
+
+  // ---------- Listen: read the whole verse, words light up as they're spoken ----------
+  // Word boundary events drive the highlight when the voice sends them; otherwise a timer estimates it.
+  let mode = 'idle', timers = [], gotBoundary = false;
+  const listenBtn = document.getElementById('listen'), turnBtn = document.getElementById('turn');
+  function stopAll() { stopVoice(); timers.forEach(clearTimeout); timers = []; mode = 'idle'; listenBtn.classList.remove('on'); turnBtn.classList.remove('on'); }
+  function listen() {
+    stopAll(); clear(); mode = 'listen'; listenBtn.classList.add('on'); hint.textContent = 'Listen…';
+    const rate = 0.8;
+    if (!('speechSynthesis' in window)) { timedRead(rate); return; }
+    const u = utter(spoken + '. ' + verse.say + '.', rate);
+    gotBoundary = false;
+    u.onboundary = e => {
+      if (e.name && e.name !== 'word') return;
+      gotBoundary = true;
+      let i = words.findIndex((w, j) => e.charIndex >= w.start && (j === words.length - 1 || e.charIndex < words[j + 1].start));
+      if (e.charIndex >= spoken.length) i = words.length; // reading the reference at the end
+      light(i);
+    };
+    let started = false;
+    u.onstart = () => { started = true; };
+    u.onend = () => { if (mode === 'listen') finish(); };
+    speechSynthesis.speak(u);
+    // no word timing (or no voice at all) after a moment: light the words on an estimated beat instead
+    timers.push(setTimeout(() => { if (!gotBoundary && mode === 'listen') timedRead(rate, started); }, 900));
+  }
+  // fallback when the voice doesn't report word timing: estimate it from word length
+  function timedRead(rate, alreadyTalking) {
+    let t = alreadyTalking ? 0 : 300;
+    words.forEach((w, i) => {
+      timers.push(setTimeout(() => light(i), t));
+      t += (190 + w.text.length * 55) / rate + (/[,.]$/.test(w.text) ? 260 : 0);
+    });
+    timers.push(setTimeout(() => { if (mode === 'listen') finish(); }, t + 1200));
+  }
+
+  // ---------- Your turn: every tap lights the next word and says it ----------
+  let next = 0;
+  function startTurn() {
+    stopAll(); clear(); mode = 'turn'; next = 0; turnBtn.classList.add('on');
+    hint.textContent = 'Tap anywhere for the next word!';
+    words[0].el.classList.add('next');
+  }
+  function step() {
+    const w = words[next]; if (!w) return;
+    w.el.classList.remove('next'); light(next); chime(next);
+    if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(w.text.replace(/[,.]/g, ''), 0.85)); }
+    next++;
+    if (next < words.length) words[next].el.classList.add('next');
+    else timers.push(setTimeout(finish, 700));
+  }
+
+  // ---------- Celebrate ----------
+  function finish() {
+    mode = 'idle'; listenBtn.classList.remove('on'); turnBtn.classList.remove('on');
+    words.forEach(w => w.el.classList.add('lit')); light(-1);
+    document.querySelectorAll('.phrase').forEach(r => r.classList.add('lit'));
+    hint.textContent = 'You did it! ' + verse.ref + ' ⭐';
+    burst();
+    if ('speechSynthesis' in window) timers.push(setTimeout(() => speechSynthesis.speak(utter('Yay! ' + verse.say + '!', 0.9)), 400));
+  }
+
+  // ---------- Sound: a soft chime per tapped word (pentatonic, so any run sounds nice) ----------
+  let actx = null;
+  function audio() {
+    if (!actx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) actx = new AC(); }
+    if (actx && actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  const NOTES = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.51];
+  function chime(i) {
+    if (!audio()) return;
+    const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'triangle'; o.frequency.value = NOTES[i % NOTES.length];
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.08, t + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.55);
+  }
+
+  // ---------- Confetti ----------
+  const cv = document.getElementById('confetti'), cx = cv.getContext('2d');
+  let bits = [], raf = 0;
+  function burst() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    for (let k = 0; k < 140; k++) bits.push({ x: Math.random() * innerWidth, y: -20 - Math.random() * innerHeight * 0.5, vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 160,
+      r: Math.random() * 6, vr: (Math.random() - 0.5) * 10, w: 8 + Math.random() * 8, h: 5 + Math.random() * 5, c: BRIGHT[k % 7] });
+    let last = performance.now();
+    cancelAnimationFrame(raf);
+    const tick = now => {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      cx.clearRect(0, 0, innerWidth, innerHeight);
+      bits = bits.filter(b => b.y < innerHeight + 30);
+      for (const b of bits) {
+        b.x += b.vx * dt; b.y += b.vy * dt; b.r += b.vr * dt;
+        cx.save(); cx.translate(b.x, b.y); cx.rotate(b.r); cx.fillStyle = b.c; cx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h); cx.restore();
+      }
+      if (bits.length) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+  }
+
+  // ---------- Input ----------
+  // the two buttons start a mode; in "your turn", a tap anywhere else is the next word
+  listenBtn.addEventListener('pointerdown', e => { e.preventDefault(); audio(); listen(); });
+  turnBtn.addEventListener('pointerdown', e => { e.preventDefault(); audio(); startTurn(); });
+  document.getElementById('app').addEventListener('pointerdown', e => {
+    if (e.target.closest('.big')) return;
+    audio();
+    if (mode === 'turn') step();
+    else if (mode === 'idle') { const w = e.target.closest('.w'); if (w && 'speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(w.textContent.replace(/[,.]/g, ''), 0.85)); } }
+  });
+  addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopAll(); });
+})();
+</script>
+</body>
+</html>
