@@ -314,6 +314,7 @@
   const PAGE_ORDER = ['', ...Object.keys(PAGES)];
   const outline = document.createElement('canvas'), octx = outline.getContext('2d');
   let page = null, wall = null, lineW = 0; // page: { name, cx, cy, S }; wall: 1 where a line is; lineW in device px
+  let labels = null, boxes = null, runs = null, runAt = null; // labels: region id per pixel (0 on a line); boxes: x0,y0,x1,y1 per id; runs: x,y,len of each horizontal span, runAt[id] where a region's start. labels null = too many regions, flood fill instead
   const fills = [];
   function pageBox() {
     // keep clear of the kid color buttons: a column on the left when tall, a row on top when wide, plus the picture strip
@@ -333,9 +334,10 @@
       a: shape((x, y, r, a0, a1) => g.arc(x, y, r, a0, a1)),
     });
   }
+  let warmTimer = 0;
   function drawOutline() {
-    outline.width = cv.width; outline.height = cv.height; wall = null;
-    if (!page || !PAGES[page.name]) return;
+    outline.width = cv.width; outline.height = cv.height; wall = null; fillPool.length = 0;
+    if (!page || !PAGES[page.name]) { labels = boxes = runs = runAt = null; return; }
     const g = octx, S = page.S;
     g.setTransform(dpr * S, 0, 0, dpr * S, dpr * page.cx, dpr * page.cy);
     lineW = Math.max(5, S * 0.035) * dpr;
@@ -344,8 +346,63 @@
     drawLines(g, page.name);
     g.setTransform(1, 0, 0, 1, 0, 0);
     const d = g.getImageData(0, 0, outline.width, outline.height).data;
-    wall = new Uint8Array(outline.width * outline.height);
-    for (let i = 0, j = 3; i < wall.length; i++, j += 4) wall[i] = d[j] > 90 ? 1 : 0;
+    labelRegions(d, outline.width, outline.height);
+    // warm one fill canvas a moment later, so the first tap on a page doesn't pay for the big allocation (and the page switch doesn't)
+    clearTimeout(warmTimer); warmTimer = setTimeout(() => {
+      if (fillPool.length || !wall) return;
+      const c = takeFillCanvas(outline.width, outline.height), cx = c.getContext('2d'); cx.fillRect(0, 0, 1, 1); cx.clearRect(0, 0, 1, 1); fillPool.push(c);
+    }, 400);
+  }
+  // builds wall and numbers every open area once per page, so a tap is a lookup instead of a flood fill.
+  // One pass cuts each row into open runs, neighbouring rows' runs that touch are joined (union-find), then each run is labeled
+  function labelRegions(d, w, h) {
+    labels = boxes = runs = runAt = null;
+    wall = new Uint8Array(w * h);
+    let rs = new Int32Array(3 * 4096), rn = 0;
+    const rowAt = new Int32Array(h + 1);
+    const add = (x, y, len) => { if (rn * 3 === rs.length) { const g = new Int32Array(rs.length * 2); g.set(rs); rs = g; } rs[rn * 3] = x; rs[rn * 3 + 1] = y; rs[rn * 3 + 2] = len; rn++; };
+    for (let y = 0, i = 0, j = 3; y < h; y++) {
+      rowAt[y] = rn;
+      let start = -1;
+      for (let x = 0; x < w; x++, i++, j += 4) {
+        if (d[j] > 90) { wall[i] = 1; if (start >= 0) { add(start, y, x - start); start = -1; } }
+        else if (start < 0) start = x;
+      }
+      if (start >= 0) add(start, y, w - start);
+    }
+    rowAt[h] = rn;
+    const parent = new Int32Array(rn);
+    for (let i = 0; i < rn; i++) parent[i] = i;
+    const find = i => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+    for (let y = 1; y < h; y++) {
+      let a = rowAt[y - 1], b = rowAt[y]; const ae = b, be = rowAt[y + 1];
+      while (a < ae && b < be) {
+        const ax1 = rs[a * 3] + rs[a * 3 + 2], bx1 = rs[b * 3] + rs[b * 3 + 2];
+        if (rs[a * 3] < bx1 && rs[b * 3] < ax1) { const ra = find(a), rb = find(b); if (ra !== rb) parent[rb] = ra; }
+        if (ax1 < bx1) a++; else b++;
+      }
+    }
+    const idOf = new Int32Array(rn), runId = new Int32Array(rn);
+    let n = 0;
+    for (let i = 0; i < rn; i++) {
+      const r = find(i);
+      if (!idOf[r]) { if (++n > 65535) return; idOf[r] = n; } // too many areas: fall back to the flood fill
+      runId[i] = idOf[r];
+    }
+    // group each region's runs together, and fill the label map a run at a time
+    const at = new Uint32Array(n + 2), bb = new Int32Array((n + 1) * 4);
+    for (let i = 0; i < rn; i++) at[runId[i] + 1]++;
+    for (let k = 1; k <= n + 1; k++) at[k] += at[k - 1];
+    const pos = at.slice(), sorted = new Int32Array(rn * 3), lab = new Uint16Array(w * h);
+    for (let id = 1; id <= n; id++) { bb[id * 4] = w; bb[id * 4 + 1] = h; bb[id * 4 + 2] = 0; bb[id * 4 + 3] = 0; }
+    for (let i = 0; i < rn; i++) {
+      const id = runId[i], k = pos[id]++, x = rs[i * 3], y = rs[i * 3 + 1], len = rs[i * 3 + 2];
+      sorted[k * 3] = x; sorted[k * 3 + 1] = y; sorted[k * 3 + 2] = len;
+      lab.fill(id, y * w + x, y * w + x + len);
+      if (x < bb[id * 4]) bb[id * 4] = x; if (y < bb[id * 4 + 1]) bb[id * 4 + 1] = y;
+      if (x + len - 1 > bb[id * 4 + 2]) bb[id * 4 + 2] = x + len - 1; if (y > bb[id * 4 + 3]) bb[id * 4 + 3] = y;
+    }
+    labels = lab; boxes = bb; runs = sorted; runAt = at;
   }
   function setPage(name) {
     clearPaint();
@@ -356,6 +413,35 @@
   // flood-fill the open area under the finger, then pour it in from that spot
   const rgbOf = (() => { const c = document.createElement('canvas').getContext('2d', { willReadFrequently: true }); c.canvas.width = c.canvas.height = 1;
     return css => { c.clearRect(0, 0, 1, 1); c.fillStyle = css; c.fillRect(0, 0, 1, 1); return c.getImageData(0, 0, 1, 1).data; }; })();
+  // fill canvases are page-sized and a fresh one per tap makes a big allocation, so a couple are reused (cleared by box when done)
+  const fillPool = [];
+  function takeFillCanvas(w, h) {
+    const c = fillPool.pop();
+    if (c && c.width === w && c.height === h) return c;
+    const n = document.createElement('canvas'); n.width = w; n.height = h; return n;
+  }
+  function giveFillCanvas(f) {
+    f.fc.getContext('2d').clearRect(f.x0, f.y0, f.fw, f.fh);
+    if (fillPool.length < 2) fillPool.push(f.fc);
+  }
+  const regionBox = id => [boxes[id * 4], boxes[id * 4 + 1], boxes[id * 4 + 2], boxes[id * 4 + 3]];
+  // the old way, for pages with more than 65535 open areas: flood from the tap, leaving the result in floodMask
+  let floodMask = null;
+  function floodBox(px, py) {
+    const w = outline.width, h = outline.height, mask = new Uint8Array(w * h), stack = new Int32Array(w * h);
+    let sp = 0, x0 = px, x1 = px, y0 = py, y1 = py;
+    stack[sp++] = py * w + px; mask[py * w + px] = 1;
+    while (sp) {
+      const i = stack[--sp], ix = i % w, iy = (i - ix) / w;
+      if (ix < x0) x0 = ix; if (ix > x1) x1 = ix; if (iy < y0) y0 = iy; if (iy > y1) y1 = iy;
+      if (ix > 0 && !mask[i - 1] && !wall[i - 1]) { mask[i - 1] = 1; stack[sp++] = i - 1; }
+      if (ix < w - 1 && !mask[i + 1] && !wall[i + 1]) { mask[i + 1] = 1; stack[sp++] = i + 1; }
+      if (iy > 0 && !mask[i - w] && !wall[i - w]) { mask[i - w] = 1; stack[sp++] = i - w; }
+      if (iy < h - 1 && !mask[i + w] && !wall[i + w]) { mask[i + w] = 1; stack[sp++] = i + w; }
+    }
+    floodMask = mask;
+    return [x0, y0, x1, y1];
+  }
   function fillAt(x, y, css) {
     if (!wall) return false;
     const w = outline.width, h = outline.height;
@@ -370,26 +456,24 @@
       }
       if (!ok) return false;
     }
-    const mask = new Uint8Array(w * h), stack = new Int32Array(w * h);
-    let sp = 0, x0 = px, x1 = px, y0 = py, y1 = py;
-    stack[sp++] = py * w + px; mask[py * w + px] = 1;
-    while (sp) {
-      const i = stack[--sp], ix = i % w, iy = (i - ix) / w;
-      if (ix < x0) x0 = ix; if (ix > x1) x1 = ix; if (iy < y0) y0 = iy; if (iy > y1) y1 = iy;
-      if (ix > 0 && !mask[i - 1] && !wall[i - 1]) { mask[i - 1] = 1; stack[sp++] = i - 1; }
-      if (ix < w - 1 && !mask[i + 1] && !wall[i + 1]) { mask[i + 1] = 1; stack[sp++] = i + 1; }
-      if (iy > 0 && !mask[i - w] && !wall[i - w]) { mask[i - w] = 1; stack[sp++] = i - w; }
-      if (iy < h - 1 && !mask[i + w] && !wall[i + w]) { mask[i + w] = 1; stack[sp++] = i + w; }
+    const [x0, y0, x1, y1] = labels ? regionBox(labels[py * w + px]) : floodBox(px, py);
+    const fw = x1 - x0 + 1, fh = y1 - y0 + 1, fc = takeFillCanvas(w, h);
+    const fx = fc.getContext('2d');
+    if (labels) {
+      // draw the region's runs: the work follows its outline, not its area, so the big background is as quick as a small shape
+      const id = labels[py * w + px];
+      fx.fillStyle = css; fx.beginPath();
+      for (let k = runAt[id], e = runAt[id + 1]; k < e; k++) fx.rect(runs[k * 3], runs[k * 3 + 1], runs[k * 3 + 2], 1);
+      fx.fill();
+    } else {
+      const img = fx.createImageData(fw, fh), [r, g, b] = rgbOf(css);
+      const px4 = new Uint8Array([r, g, b, 255]), packed = new Uint32Array(px4.buffer)[0], out = new Uint32Array(img.data.buffer);
+      for (let yy = 0; yy < fh; yy++) for (let xx = 0; xx < fw; xx++) if (floodMask[(yy + y0) * w + xx + x0]) out[yy * fw + xx] = packed;
+      floodMask = null;
+      fx.putImageData(img, x0, y0);
     }
-    const fw = x1 - x0 + 1, fh = y1 - y0 + 1, fc = document.createElement('canvas'); fc.width = fw; fc.height = fh;
-    const fx = fc.getContext('2d'), img = fx.createImageData(fw, fh), [r, g, b] = rgbOf(css);
-    for (let yy = 0; yy < fh; yy++) for (let xx = 0; xx < fw; xx++) {
-      if (!mask[(yy + y0) * w + xx + x0]) continue;
-      const k = (yy * fw + xx) * 4; img.data[k] = r; img.data[k + 1] = g; img.data[k + 2] = b; img.data[k + 3] = 255;
-    }
-    fx.putImageData(img, 0, 0);
     const far = Math.hypot(Math.max(px - x0, x1 - px), Math.max(py - y0, y1 - py)); // farthest corner
-    fills.push({ fc, x0, y0, px, py, far, t: 0 });
+    fills.push({ fc, x0, y0, fw, fh, px, py, far, t: 0 });
     pourSound();
     burst(x, y, 10, unit() * 0.25, css);
     return true;
@@ -450,7 +534,7 @@
     idle += dt;
     for (let i = fills.length - 1; i >= 0; i--) {
       const f = fills[i]; f.t += dt;
-      if (f.t > 0.35) { pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.drawImage(f.fc, f.x0, f.y0); pctx.restore(); fills.splice(i, 1); }
+      if (f.t > 0.35) { pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.drawImage(f.fc, f.x0, f.y0, f.fw, f.fh, f.x0, f.y0, f.fw, f.fh); pctx.restore(); giveFillCanvas(f); fills.splice(i, 1); }
     }
     if (blank && idle > 2 && !page) {
       hintT += dt * 1.6;
@@ -474,7 +558,7 @@
     for (const f of fills) {
       // the color pours out from the finger
       const k = Math.min(1, f.t / 0.35), r = f.far * (1 - (1 - k) * (1 - k)) + 2;
-      ctx.save(); ctx.beginPath(); ctx.arc(f.px, f.py, r, 0, TAU); ctx.clip(); ctx.drawImage(f.fc, f.x0, f.y0); ctx.restore();
+      ctx.save(); ctx.beginPath(); ctx.arc(f.px, f.py, r, 0, TAU); ctx.clip(); ctx.drawImage(f.fc, f.x0, f.y0, f.fw, f.fh, f.x0, f.y0, f.fw, f.fh); ctx.restore();
     }
     if (page) ctx.drawImage(outline, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
