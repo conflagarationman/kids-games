@@ -193,6 +193,9 @@
   const HAS_BLACK = [true, true, false, true, true, true, false]; // a black key sits after C D F G A
 
   let keys = [], buttons = [];
+  const ICON_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  const SS = 1.3; // sprites are drawn a little oversize so bouncing buttons stay sharp
+  let dpr = 1, staticKeys = null, sbox = null, sprites = {}, dirty = true, wasAnimating = true; // see Drawing
   const inset = name => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
   const autoRange = () => (W - 2 * Math.max(12, W * 0.03)) / 15 >= 52 ? 2 : 1;
   function layout() {
@@ -236,9 +239,10 @@
       const bw = ww * 0.6, midi = keys[i].midi + 1;
       keys.push({ white: false, midi, deg, x: left + (i + 1) * ww - bw / 2, y: top, w: bw, h: kh * 0.6, color: NOTE_COLORS[deg] });
     }
+    rebuild();
   }
   function resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 2);
+    dpr = Math.min(devicePixelRatio || 1, 2);
     W = innerWidth; H = innerHeight;
     cv.width = W * dpr; cv.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -299,7 +303,7 @@
     if (f.voice) f.voice.stop();
     if (f.ev && rec) f.ev.dur = Math.max(0.08, clock() - rec.t0 - f.ev.t);
   }
-  function releaseAll() { for (const f of fingers.values()) releaseKey(f); fingers.clear(); held.clear(); }
+  function releaseAll() { for (const f of fingers.values()) releaseKey(f); fingers.clear(); held.clear(); dirty = true; }
 
   // ---------- Record & play back ----------
   // A take is a list of { t, kind: 'key' | 'pad', midi, voice, dur, id } in seconds from the start.
@@ -339,7 +343,7 @@
   }
 
   function tapButton(b) {
-    b.bounce = 1;
+    b.bounce = 1; dirty = true;
     if (!audio()) return;
     if (b.id === 'rec') { rec ? stopRec() : startRec(); return; }
     if (b.id === 'play') { playing ? stopPlay() : startPlay(); return; }
@@ -375,20 +379,61 @@
   addEventListener('resize', resize); resize();
 
   // ---------- Drawing ----------
-  function roundRect(x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.closePath();
+  // Soft shadows are slow on iPad Safari, so everything that doesn't change is drawn once in rebuild():
+  // the resting white keys go on one offscreen layer and each button (shadow and all) becomes a sprite.
+  // Frames then only draw what is live, and when nothing moves they draw nothing at all.
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x, y); c.lineTo(x + w, y); c.lineTo(x + w, y + h - r);
+    c.quadraticCurveTo(x + w, y + h, x + w - r, y + h); c.lineTo(x + r, y + h);
+    c.quadraticCurveTo(x, y + h, x, y + h - r); c.closePath();
+  }
+  function makeSprite(b, on) {
+    const half = Math.ceil(b.r * 1.15 + 16), px = Math.ceil(2 * half * dpr * SS);
+    const cv2 = document.createElement('canvas'); cv2.width = cv2.height = px;
+    const g = cv2.getContext('2d'); g.setTransform(dpr * SS, 0, 0, dpr * SS, px / 2, px / 2);
+    // sound switches are circles; drum and clap are square pads you hit
+    g.beginPath();
+    if (b.pad) { const q = b.r * 0.92, c = q * 0.35; g.moveTo(-q + c, -q); g.arcTo(q, -q, q, q, c); g.arcTo(q, q, -q, q, c); g.arcTo(-q, q, -q, -q, c); g.arcTo(-q, -q, q, -q, c); g.closePath(); }
+    else g.arc(0, 0, b.r, 0, Math.PI * 2);
+    g.fillStyle = b.ctrl ? (on ? (b.id === 'rec' ? '#ffe3e3' : '#e0fbe8') : 'rgba(255,255,255,.75)') : b.pad ? 'rgba(255,240,214,.95)' : on ? '#fff' : 'rgba(255,255,255,.75)';
+    g.shadowColor = 'rgba(43,45,92,.2)'; g.shadowBlur = 10 * SS; g.shadowOffsetY = 3 * SS; // blur and offset are in device pixels
+    g.fill();
+    g.shadowColor = 'transparent';
+    if (on && !b.ctrl) { g.lineWidth = Math.max(5, b.r * 0.12); g.strokeStyle = '#ff6fb1'; g.stroke(); }
+    if (b.icon) {
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = '#000'; // color emoji take on the fill's transparency, so keep it solid
+      g.font = `${b.r * 1.1}px ${ICON_FONT}`;
+      g.fillText(b.icon, 0, b.r * 0.06);
+    }
+    return { img: cv2, size: px / (dpr * SS) };
+  }
+  // Everything built from fonts and shadows lives here, so it can be run again when a font loads.
+  function rebuild() {
+    sprites = {};
+    for (const b of buttons) {
+      if (b.ctrl) { sprites[b.id] = makeSprite(b, false); sprites[b.id + ':on'] = makeSprite(b, true); }
+      else { sprites[b.id] = makeSprite(b, false); if (!b.pad) sprites[b.id + ':on'] = makeSprite(b, true); }
+    }
+    const whites = keys.filter(k => k.white);
+    if (whites.length) {
+      const first = whites[0], lastK = whites[whites.length - 1];
+      sbox = { x: Math.floor(first.x) - 2, y: Math.floor(first.y) - 2, w: Math.ceil(lastK.x + lastK.w - first.x) + 4, h: Math.ceil(first.h) + 4 };
+      staticKeys = staticKeys || document.createElement('canvas');
+      staticKeys.width = Math.ceil(sbox.w * dpr); staticKeys.height = Math.ceil(sbox.h * dpr);
+      const g = staticKeys.getContext('2d');
+      g.setTransform(dpr, 0, 0, dpr, -sbox.x * dpr, -sbox.y * dpr);
+      for (const k of whites) drawKey(g, k, false, 0);
+    }
+    dirty = true;
   }
   function drawControl(b) {
     const isRec = b.id === 'rec', active = isRec ? !!rec : !!playing, ready = isRec || !!take;
     const pulse = active ? 1 + Math.sin(performance.now() / 160) * 0.06 : 1;
-    const s = pulse + Math.sin(b.bounce * Math.PI) * 0.15;
+    const s = pulse + Math.sin(b.bounce * Math.PI) * 0.15, sp = sprites[b.id + (active ? ':on' : '')];
     ctx.save(); ctx.translate(b.x, b.y); ctx.scale(s, s); ctx.globalAlpha = ready ? 1 : 0.4;
-    ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2);
-    ctx.fillStyle = active ? (isRec ? '#ffe3e3' : '#e0fbe8') : 'rgba(255,255,255,.75)';
-    ctx.shadowColor = 'rgba(43,45,92,.2)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3; ctx.fill(); ctx.shadowColor = 'transparent';
+    ctx.drawImage(sp.img, -sp.size / 2, -sp.size / 2, sp.size, sp.size);
     const col = isRec ? '#ff3b3b' : '#22b84a';
     if (rec && isRec) {
       // how much of the 20 seconds is used
@@ -405,49 +450,36 @@
     if (b.ctrl) return drawControl(b);
     const on = !b.pad && settings.voice === b.id;
     const s = (on ? 1.08 : 1) + Math.sin(b.bounce * Math.PI) * 0.15 + (b.pad ? beatPulse * 0.06 : 0);
+    const sp = sprites[b.id + (on ? ':on' : '')];
     ctx.save(); ctx.translate(b.x, b.y); ctx.scale(s, s);
-    // sound switches are circles; drum and clap are square pads you hit
-    ctx.beginPath();
-    if (b.pad) { const q = b.r * 0.92, c = q * 0.35; ctx.moveTo(-q + c, -q); ctx.arcTo(q, -q, q, q, c); ctx.arcTo(q, q, -q, q, c); ctx.arcTo(-q, q, -q, -q, c); ctx.arcTo(-q, -q, q, -q, c); ctx.closePath(); }
-    else ctx.arc(0, 0, b.r, 0, Math.PI * 2);
-    ctx.fillStyle = b.pad ? 'rgba(255,240,214,.95)' : on ? '#fff' : 'rgba(255,255,255,.75)';
-    ctx.shadowColor = 'rgba(43,45,92,.2)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
-    ctx.fill();
-    ctx.shadowColor = 'transparent';
-    if (on) { ctx.lineWidth = Math.max(5, b.r * 0.12); ctx.strokeStyle = '#ff6fb1'; ctx.stroke(); }
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#000'; // color emoji take on the fill's transparency, so keep it solid
-    ctx.font = `${b.r * 1.1}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
-    ctx.fillText(b.icon, 0, b.r * 0.06);
+    ctx.drawImage(sp.img, -sp.size / 2, -sp.size / 2, sp.size, sp.size);
     ctx.restore();
   }
-  function drawKey(k) {
-    const down = held.has(k.midi) || ghost.has(k.midi), r = Math.min(12, k.w * 0.18);
-    const dy = down ? 4 : 0;
+  // glow: how strongly the song's next-key color shows (0 = none)
+  function drawKey(c, k, down, glow) {
+    const r = Math.min(12, k.w * 0.18), dy = down ? 4 : 0;
     if (k.white) {
-      ctx.fillStyle = down ? k.color : '#fffdf8';
-      roundRect(k.x + 2, k.y + dy, k.w - 4, k.h - dy, r); ctx.fill();
+      c.fillStyle = down ? k.color : '#fffdf8';
+      roundRect(c, k.x + 2, k.y + dy, k.w - 4, k.h - dy, r); c.fill();
       // the next key of the song glows in its own color
-      if (!down && songTarget() === k.midi) {
-        ctx.globalAlpha = 0.3 + 0.25 * Math.sin(performance.now() / 160); ctx.fillStyle = k.color; ctx.fill(); ctx.globalAlpha = 1;
-      }
-      ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(43,45,92,.25)'; ctx.stroke();
+      if (glow) { c.globalAlpha = glow; c.fillStyle = k.color; c.fill(); c.globalAlpha = 1; }
+      c.lineWidth = 2; c.strokeStyle = 'rgba(43,45,92,.25)'; c.stroke();
       // the label sits near the bottom where a finger doesn't cover it
       const cx = k.x + k.w / 2, cy = k.y + k.h - Math.min(k.w * 0.5, k.h * 0.12);
       if (settings.labels === 'letters') {
-        ctx.font = `900 ${Math.min(k.w * 0.5, 34)}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillStyle = down ? '#fff' : k.color; ctx.fillText(k.name, cx, cy);
+        c.font = `900 ${Math.min(k.w * 0.5, 34)}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
+        c.textAlign = 'center'; c.textBaseline = 'middle';
+        c.fillStyle = down ? '#fff' : k.color; c.fillText(k.name, cx, cy);
       } else {
-        ctx.fillStyle = down ? '#fff' : k.color;
-        ctx.beginPath(); ctx.arc(cx, cy, Math.min(k.w * 0.22, 18), 0, Math.PI * 2); ctx.fill();
+        c.fillStyle = down ? '#fff' : k.color;
+        c.beginPath(); c.arc(cx, cy, Math.min(k.w * 0.22, 18), 0, Math.PI * 2); c.fill();
       }
     } else {
-      ctx.fillStyle = down ? k.color : '#2b2d5c';
-      roundRect(k.x, k.y + dy, k.w, k.h - dy, r * 0.7); ctx.fill();
+      c.fillStyle = down ? k.color : '#2b2d5c';
+      roundRect(c, k.x, k.y + dy, k.w, k.h - dy, r * 0.7); c.fill();
       // a darker shade when pressed, so it doesn't merge with the white key next to it
-      if (down) { ctx.fillStyle = 'rgba(43,45,92,.35)'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#2b2d5c'; ctx.stroke(); }
-      if (!down) { ctx.fillStyle = 'rgba(255,255,255,.18)'; roundRect(k.x + k.w * 0.18, k.y + 4, k.w * 0.64, k.h * 0.75, r * 0.5); ctx.fill(); }
+      if (down) { c.fillStyle = 'rgba(43,45,92,.35)'; c.fill(); c.lineWidth = 2; c.strokeStyle = '#2b2d5c'; c.stroke(); }
+      if (!down) { c.fillStyle = 'rgba(255,255,255,.18)'; roundRect(c, k.x + k.w * 0.18, k.y + 4, k.w * 0.64, k.h * 0.75, r * 0.5); c.fill(); }
     }
   }
 
@@ -467,11 +499,21 @@
       if (c.y > H + 30) confetti.splice(i, 1);
     }
   }
+  const isDown = k => held.has(k.midi) || ghost.has(k.midi);
+  // true while anything on screen is moving, so the loop knows when it can rest
+  const animating = () => held.size || ghost.size || notes.length || confetti.length || beatPulse > 0 || rec || playing || songTarget() !== null || buttons.some(b => b.bounce > 0);
   function draw() {
     ctx.clearRect(0, 0, W, H);
     for (const b of buttons) drawButton(b);
-    for (const k of keys) if (k.white) drawKey(k);
-    for (const k of keys) if (!k.white) drawKey(k);
+    if (staticKeys) ctx.drawImage(staticKeys, sbox.x, sbox.y, sbox.w, sbox.h);
+    // only keys that differ from the resting layer are redrawn: pressed, ghosted or glowing
+    const target = songTarget(), now = performance.now();
+    for (const k of keys) {
+      if (!k.white) continue;
+      const down = isDown(k), glow = !down && target === k.midi ? 0.3 + 0.25 * Math.sin(now / 160) : 0;
+      if (down || glow) { ctx.clearRect(k.x, k.y - 2, k.w, k.h + 4); drawKey(ctx, k, down, glow); }
+    }
+    for (const k of keys) if (!k.white) drawKey(ctx, k, isDown(k), 0);
     // a bouncing star above the next song key
     const tk = keys.find(k => k.midi === songTarget());
     if (tk) {
@@ -496,7 +538,11 @@
   }
   function loop(t) {
     const dt = Math.min(0.05, (t - last) / 1000); last = t;
-    update(dt); draw(); requestAnimationFrame(loop);
+    update(dt);
+    const busy = animating();
+    if (busy || wasAnimating || dirty) { draw(); dirty = false; } // one last draw after the motion stops
+    wasAnimating = !!busy;
+    requestAnimationFrame(loop);
   }
 
   // ---------- Grown-up panel (press & hold 1.5s) ----------
@@ -517,8 +563,8 @@
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
   }
   each('[data-beat]', b => b.onclick = () => { settings.beat = +b.dataset.beat; saveSettings(); syncPanel(); audio(); });
-  each('[data-song]', b => b.onclick = () => { settings.song = b.dataset.song; songPos = 0; songDone = 0; saveSettings(); syncPanel(); });
-  each('[data-labels]', b => b.onclick = () => { settings.labels = b.dataset.labels; saveSettings(); syncPanel(); });
+  each('[data-song]', b => b.onclick = () => { settings.song = b.dataset.song; songPos = 0; songDone = 0; dirty = true; saveSettings(); syncPanel(); });
+  each('[data-labels]', b => b.onclick = () => { settings.labels = b.dataset.labels; saveSettings(); syncPanel(); rebuild(); });
   each('[data-range]', b => b.onclick = () => { settings.range = +b.dataset.range; saveSettings(); layout(); syncPanel(); });
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
   document.getElementById('tFull').onclick = () => {
