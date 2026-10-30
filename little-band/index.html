@@ -39,6 +39,7 @@
   .toggles button.off { opacity: .45; }
   .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
 </style>
+<link rel="stylesheet" href="../shared/grownup.css">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -79,10 +80,12 @@
       <button id="tSound">🔊 Sounds</button>
       <button id="tFull" style="grid-column: span 2">⛶ Full screen</button>
     </div>
+    <div data-kg-panel></div>
     <button class="done" id="done">Let's play!</button>
   </div>
 </div>
 
+<script src="../shared/grownup.js"></script>
 <script>
 (() => {
   // ---------- Settings (only settings are saved) ----------
@@ -93,13 +96,14 @@
 
   // ---------- Audio: every instrument is made right here, no sound files ----------
   let actx = null, master = null, noiseBuf = null;
+  let vol = 1, asleep = false; // vol: the grown-up timer's wind-down multiplier; asleep: goodnight, so nothing makes a sound
   const LIMITER_TRIM = 0.535;
   function audio() {
     if (!actx) {
       try {
         actx = new (window.AudioContext || window.webkitAudioContext)();
         // everything (notes, drums, the beat) goes master -> limiter -> speakers, so a pile of held notes can't clip
-        master = actx.createGain(); master.gain.value = 0.8;
+        master = actx.createGain(); master.gain.value = 0.8 * vol;
         const limiter = actx.createDynamicsCompressor();
         limiter.threshold.value = -12; limiter.knee.value = 6; limiter.ratio.value = 12; limiter.attack.value = 0.003; limiter.release.value = 0.25;
         // the compressor adds makeup gain (about +5 dB, the same for every note); this takes it back out so one note sounds as before
@@ -109,7 +113,7 @@
         const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
       } catch (e) {}
     }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (actx && actx.state === 'suspended' && !asleep) actx.resume();
     return actx;
   }
   const midiFreq = m => 440 * 2 ** ((m - 69) / 12);
@@ -622,6 +626,11 @@
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
 
   requestAnimationFrame(loop);
+  // The shared grown-up timer eases the sound down at bedtime and stops it at goodnight
+  if (window.KidsGrownup) KidsGrownup.register({
+    setVolume(v) { vol = v; asleep = false; if (master) master.gain.setTargetAtTime(0.8 * v, actx.currentTime, 0.3); },
+    pause() { asleep = true; releaseAll(); stopPlay(); if (rec) stopRec(); if (actx) actx.suspend(); },
+  });
   // Canvas text doesn't wait for web fonts: the key labels live in the cached layers, so build them again once the font is in
   if (document.fonts && document.fonts.load) document.fonts.load('900 64px "Kids Rounded"').then(() => rebuild(), () => {});
 

@@ -11,6 +11,10 @@ Simple, touch-friendly web games for little kids. Each game is a self-contained 
 
 All games share the same rules: tap and swipe only, nothing to fail, and settings behind a 1.5s press-and-hold on ⚙️ so little fingers don't open them. Each one is laid out for phones (portrait and landscape), iPads and monitors, and keeps clear of the iPhone notch and home bar when installed to the home screen.
 
+### For grown-ups
+
+Press and hold ⚙️ (top right, 1.5s) on the home page or in any game and open **Play time** to set a bedtime limit: Off, a preset (10 to 60 minutes) or any length from 5 to 120 minutes with − and +. One clock counts active play across all the games, and pauses when the screen is off. A small ring beside the ⚙️ empties as time runs down (you can add the minutes, or hide it). In the last 2 minutes it becomes a little moon, the screen warms and dims, and the sound eases down. At zero a "Goodnight!" scene fades in with a soft lullaby, and the game stays asleep until a grown-up adds minutes or starts a new session (press and hold the ⚙️ on that scene). A new day starts a new session on its own after 6 hours away.
+
 Working on this repo? Conventions, testing and deploy steps are in [CLAUDE.md](CLAUDE.md), and the backlog and history are in [ROADMAP.md](ROADMAP.md).
 
 ## Running locally

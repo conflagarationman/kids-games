@@ -1,0 +1,75 @@
+/* Grown-up play-time timer, shared by every page (see grownup.js). Needs the host page to declare the "Kids Rounded" font. */
+.kg-ring, .kg-dim, .kg-night, .kg-mini, .kg-sec { font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; }
+
+/* The countdown: a small ring just left of the grown-up gear. Never a control. */
+.kg-ring { position: fixed; top: calc(19px + env(safe-area-inset-top)); right: calc(62px + env(safe-area-inset-right)); width: 26px; height: 26px; z-index: 3; pointer-events: none; display: none; }
+.kg-ring.on { display: block; }
+.kg-ring svg { display: block; width: 26px; height: 26px; overflow: visible; }
+.kg-ring .arc { transition: stroke-dashoffset .6s linear; }
+.kg-ring .moon { transform-origin: 13px 13px; transition: transform 1s linear, opacity 1s linear; }
+.kg-ring .twinkle { animation: kg-twinkle 2.6s ease-in-out infinite; transform-origin: 21px 5px; }
+.kg-ring b { position: absolute; left: 50%; top: 29px; transform: translateX(-50%); font: 800 10px/1 "Trebuchet MS", "Segoe UI", system-ui, sans-serif; color: #fff; text-shadow: 0 1px 3px rgba(43,45,92,.55); }
+
+/* Wind-down: a warm dusky tint, up to about 25% */
+.kg-dim { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0; background: linear-gradient(180deg, #4a3280 0%, #b8567f 100%); transition: opacity 1s linear; }
+
+/* Goodnight scene */
+.kg-night { position: fixed; inset: 0; z-index: 4; overflow: hidden; opacity: 0; visibility: hidden; pointer-events: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  background: radial-gradient(120% 90% at 78% 8%, #5a49b0 0%, rgba(90,73,176,0) 55%), linear-gradient(180deg, #1c1b52 0%, #3b2f84 48%, #7b57a6 82%, #c682b4 100%);
+  transition: opacity .4s ease, visibility 0s .4s; }
+.kg-night.on { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 3s ease, visibility 0s; }
+.kg-night.on.quick { transition-duration: .4s; }
+.kg-sky { position: absolute; inset: 0; }
+.kg-star { position: absolute; width: var(--s); height: var(--s); margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2); color: #fff6cf; opacity: .25; animation: kg-twinkle var(--d) ease-in-out var(--l) infinite; }
+.kg-star svg { display: block; width: 100%; height: 100%; fill: currentColor; }
+.kg-moon { position: absolute; top: calc(7vmin + env(safe-area-inset-top)); left: calc(8vmin + env(safe-area-inset-left)); width: 26vmin; max-width: 230px; aspect-ratio: 1; filter: drop-shadow(0 0 3vmin rgba(255,236,170,.55)); animation: kg-float 7s ease-in-out infinite; }
+.kg-moon svg { display: block; width: 100%; height: 100%; }
+.kg-hill { position: absolute; left: -10%; right: -10%; bottom: -14vmin; height: 34vmin; border-radius: 50% 50% 0 0; background: linear-gradient(180deg, #5c4aa0, #3f3280); }
+.kg-scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.5vmin; padding-top: 4vmin; }
+.kg-friend { position: relative; width: min(62vmin, 360px); aspect-ratio: 300 / 260; animation: kg-breathe 4.2s ease-in-out infinite; transform-origin: 50% 90%; }
+.kg-friend svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.kg-zz { position: absolute; left: 70%; top: 6%; font: 900 4.6vmin/1 "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; color: #fff6cf; opacity: 0; animation: kg-zz 4.6s ease-in infinite; }
+.kg-zz:nth-child(2) { animation-delay: 1.5s; } .kg-zz:nth-child(3) { animation-delay: 3s; }
+.kg-title { margin: 0; font: 900 clamp(40px, 12vmin, 104px)/1.05 "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; color: #fff; letter-spacing: .5px; text-shadow: 0 .06em 0 #ff6fb1, 0 0 .5em rgba(255,236,170,.55), 0 .12em .4em rgba(20,10,60,.35); }
+.kg-spark { position: absolute; width: 9vmin; height: 9vmin; min-width: 44px; min-height: 44px; margin: -4.5vmin 0 0 -4.5vmin; pointer-events: none; color: #fff2a8; animation: kg-spark .95s ease-out forwards; filter: drop-shadow(0 0 8px rgba(255,236,170,.9)); }
+.kg-spark svg { display: block; width: 100%; height: 100%; fill: currentColor; }
+@keyframes kg-twinkle { 0%, 100% { opacity: .25; transform: scale(.7); } 50% { opacity: 1; transform: scale(1.1); } }
+@keyframes kg-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.4vmin); } }
+@keyframes kg-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.025); } }
+@keyframes kg-zz { 0% { opacity: 0; transform: translate(0, 0) scale(.6); } 20% { opacity: .95; } 100% { opacity: 0; transform: translate(4vmin, -9vmin) scale(1.5); } }
+@keyframes kg-spark { 0% { opacity: 0; transform: scale(.2) rotate(-30deg); } 25% { opacity: 1; transform: scale(1.15) rotate(0); } 100% { opacity: 0; transform: scale(.6) rotate(25deg) translateY(-4vmin); } }
+
+/* The gear on the goodnight scene: a copy of each game's #parentBtn */
+.kg-gear { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 5; touch-action: none; padding: 0; cursor: pointer; }
+.kg-gear .ring { position: absolute; inset: -4px; border-radius: 50%; border: 4px solid #ff6fb1; clip-path: inset(0 0 100% 0); pointer-events: none; }
+.kg-gear.holding .ring { animation: kg-fill 1.5s linear forwards; }
+@keyframes kg-fill { to { clip-path: inset(0 0 0 0); } }
+
+/* Mini panel on the goodnight scene */
+.kg-mini { position: fixed; inset: 0; z-index: 6; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; overflow-y: auto; padding: 16px 0; }
+.kg-mini.open { display: flex; }
+.kg-card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); margin: auto; }
+.kg-card h2 { margin: 0 0 4px; font-family: "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; }
+.kg-card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
+.kg-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+
+/* The "Play time" section that lives in each grown-up panel */
+.kg-sec { color: #2b2d5c; }
+.kg-sec .kg-label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
+.kg-sec .kg-left { font-size: 13px; opacity: .7; margin: -2px 0 8px; min-height: 1.2em; }
+.kg-sec button, .kg-card button { font: inherit; }
+.kg-btn { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; touch-action: manipulation; }
+.kg-btn.on { border-color: #7a8cff; background: #e6e9ff; }
+.kg-btn.wide { width: 100%; margin-top: 8px; }
+.kg-btn.close { width: 100%; margin-top: 14px; background: #ff6fb1; color: #fff; }
+.kg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kg-chips .kg-btn { padding: 9px 4px; min-width: 46px; flex: 1 1 0; font-size: 14px; }
+.kg-step { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.kg-step .kg-btn { width: 52px; padding: 6px 0; font-size: 22px; line-height: 1.2; flex: none; }
+.kg-step span { flex: 1; text-align: center; font-weight: 800; font-size: 15px; }
+.kg-show .kg-btn { flex: 1 1 0; font-size: 13px; padding: 9px 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kg-star, .kg-moon, .kg-friend, .kg-zz, .kg-ring .twinkle { animation: none; }
+  .kg-star { opacity: .8; }
+}

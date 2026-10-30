@@ -39,6 +39,7 @@
   .toggles button.off { opacity: .45; }
   .done { width: 100%; margin-top: 16px; background: #ff8a1f; color: #fff; }
 </style>
+<link rel="stylesheet" href="../shared/grownup.css">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -67,11 +68,13 @@
       <button id="tFull">⛶ Full screen</button>
       <button id="tNext">⏭️ Next level</button>
     </div>
+    <div data-kg-panel></div>
     <button class="done" id="done">Let's play!</button>
   </div>
 </div>
 
 <script src="matter.min.js"></script>
+<script src="../shared/grownup.js"></script>
 <script>
 (() => {
   const { Engine, Bodies, Body, Composite, Events, Sleeping, Constraint, Query } = Matter;
@@ -85,11 +88,12 @@
 
   // ---------- Audio: everything is made right here, no sound files ----------
   let actx = null, master = null, noiseBuf = null;
+  let vol = 1, asleep = false; // vol: the grown-up timer's wind-down multiplier; asleep: goodnight, so nothing makes a sound
   function audio() {
     if (!actx) {
       try {
         actx = new (window.AudioContext || window.webkitAudioContext)();
-        master = actx.createGain(); master.gain.value = 0.8;
+        master = actx.createGain(); master.gain.value = 0.8 * vol;
         // limiter: a pile-up of crash sounds squeezes down instead of clipping
         const lim = actx.createDynamicsCompressor();
         lim.threshold.value = -12; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25;
@@ -98,7 +102,7 @@
         const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
       } catch (e) {}
     }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (actx && actx.state === 'suspended' && !asleep) actx.resume();
     return actx;
   }
   const snd = () => settings.sound && audio();
@@ -943,6 +947,12 @@
   };
   document.getElementById('tNext').onclick = () => { nextLevel(); panel.classList.remove('open'); audio(); };
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
+
+  // The shared grown-up timer eases the sound down at bedtime and stops it at goodnight
+  if (window.KidsGrownup) KidsGrownup.register({
+    setVolume(v) { vol = v; asleep = false; if (master) master.gain.setTargetAtTime(0.8 * v, actx.currentTime, 0.3); },
+    pause() { asleep = true; aim = null; if (actx) actx.suspend(); },
+  });
 
   resize();
   requestAnimationFrame(loop);

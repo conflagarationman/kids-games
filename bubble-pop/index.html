@@ -26,9 +26,9 @@
   #parentBtn.holding .ring { animation: fill 1.5s linear forwards; }
   @keyframes fill { to { clip-path: inset(0 0 0 0); } }
 
-  #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; }
+  #panel { position: fixed; inset: 0; background: rgba(43,45,92,.45); display: none; align-items: center; justify-content: center; z-index: 5; overflow-y: auto; padding: 16px 0; }
   #panel.open { display: flex; }
-  .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+  .card { background: #fff; border-radius: 24px; padding: 20px 22px; width: min(420px, 92%); color: #2b2d5c; box-shadow: 0 12px 40px rgba(0,0,0,.25); margin: auto; }
   .card h2 { margin: 0 0 4px; font-family: "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; }
   .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
   .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
@@ -39,6 +39,7 @@
   .toggles button.off { opacity: .45; }
   .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
 </style>
+<link rel="stylesheet" href="../shared/grownup.css">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -75,10 +76,12 @@
       <button data-speed="1">🐇 Normal</button>
       <button data-speed="1.7" style="grid-column: span 2">🚀 Super fast</button>
     </div>
+    <div data-kg-panel></div>
     <button class="done" id="done">Let's play!</button>
   </div>
 </div>
 
+<script src="../shared/grownup.js"></script>
 <script>
 (() => {
   // ---------- Content ----------
@@ -142,17 +145,19 @@
 
   // ---------- Audio ----------
   let actx = null, out = null;
+  let vol = 1, asleep = false; // vol: the grown-up timer's wind-down multiplier; asleep: goodnight, so nothing makes a sound
   function audio() {
     if (!actx) {
       try {
         actx = new (window.AudioContext || window.webkitAudioContext)();
         // a limiter on the way out, so a pile-up of pops (kids mash the screen) never clips
-        out = actx.createDynamicsCompressor();
-        out.threshold.value = -12; out.knee.value = 6; out.ratio.value = 12; out.attack.value = 0.003; out.release.value = 0.25;
-        out.connect(actx.destination);
+        const lim = actx.createDynamicsCompressor();
+        lim.threshold.value = -12; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25;
+        lim.connect(actx.destination);
+        out = actx.createGain(); out.gain.value = vol; out.connect(lim);
       } catch (e) {}
     }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (actx && actx.state === 'suspended' && !asleep) actx.resume();
     return actx;
   }
   // Major pentatonic, so any run of pops sounds like a little tune
@@ -196,11 +201,11 @@
   }
   if ('speechSynthesis' in window) { chooseVoice(); speechSynthesis.onvoiceschanged = chooseVoice; }
   function say(text) {
-    if (!settings.voice || !('speechSynthesis' in window)) return;
+    if (!settings.voice || asleep || !('speechSynthesis' in window)) return;
     speechSynthesis.cancel(); // always say the newest thing, never a backlog
     const u = new SpeechSynthesisUtterance(text);
     if (voice) u.voice = voice;
-    u.rate = 0.9; u.pitch = 1.3;
+    u.rate = 0.9; u.pitch = 1.3; u.volume = vol;
     speechSynthesis.speak(u);
   }
 
@@ -762,6 +767,12 @@
     else (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
   };
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
+
+  // The shared grown-up timer eases the sound down at bedtime and stops it at goodnight
+  if (window.KidsGrownup) KidsGrownup.register({
+    setVolume(v) { vol = v; asleep = false; if (out) out.gain.setTargetAtTime(v, actx.currentTime, 0.3); },
+    pause() { asleep = true; down.clear(); if ('speechSynthesis' in window) speechSynthesis.cancel(); if (actx) actx.suspend(); },
+  });
 
   resize(); // sizes the canvas and queues the sprites
   // Canvas text doesn't wait for web fonts, so the letter and number sprites are built again once the font is in.

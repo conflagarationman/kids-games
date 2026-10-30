@@ -1,7 +1,7 @@
 // Offline support: cache everything, serve from cache, refresh in the background when online.
 // All the games share one site, so only clear out this game's own old caches.
-const CACHE = 'magic-paint-v8';
-const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png', '../shared/KidsRounded.woff2'];
+const CACHE = 'magic-paint-v9';
+const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png', '../shared/KidsRounded.woff2', '../shared/grownup.js', '../shared/grownup.css'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
