@@ -87,7 +87,11 @@
     if (!actx) {
       try {
         actx = new (window.AudioContext || window.webkitAudioContext)();
-        master = actx.createGain(); master.gain.value = 0.8; master.connect(actx.destination);
+        master = actx.createGain(); master.gain.value = 0.8;
+        // limiter: a pile-up of crash sounds squeezes down instead of clipping
+        const lim = actx.createDynamicsCompressor();
+        lim.threshold.value = -12; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25;
+        master.connect(lim); lim.connect(actx.destination);
         noiseBuf = actx.createBuffer(1, actx.sampleRate * 0.5, actx.sampleRate);
         const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
       } catch (e) {}
