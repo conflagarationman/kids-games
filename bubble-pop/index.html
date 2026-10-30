@@ -126,15 +126,16 @@
 
   // ---------- Canvas ----------
   const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-  let W = 0, H = 0, SAT = 0;
+  let W = 0, H = 0, SAT = 0, DPR = 1;
   function resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const dpr = DPR = Math.min(devicePixelRatio || 1, 2);
     W = innerWidth; H = innerHeight;
     SAT = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sat')) || 0; // notch height, for the Find it badge
     cv.width = W * dpr; cv.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (typeof buildSprites === 'function') buildSprites(); // unit() changed, so the cloud sprites and size buckets change too
   }
-  addEventListener('resize', resize); resize();
+  addEventListener('resize', resize);
   const unit = () => Math.min(W, H);
 
   // ---------- Audio ----------
@@ -343,54 +344,139 @@
   document.addEventListener('gesturestart', e => e.preventDefault()); // iOS pinch zoom
 
   // ---------- Drawing ----------
-  function shapePath(shape, x, y, s) {
-    ctx.beginPath();
+  function shapePath(c, shape, x, y, s) {
+    c.beginPath();
     switch (shape) {
-      case 'Circle': ctx.arc(x, y, s, 0, Math.PI * 2); break;
-      case 'Square': ctx.rect(x - s * 0.85, y - s * 0.85, s * 1.7, s * 1.7); break;
-      case 'Triangle': ctx.moveTo(x, y - s); ctx.lineTo(x + s * 0.95, y + s * 0.75); ctx.lineTo(x - s * 0.95, y + s * 0.75); ctx.closePath(); break;
-      case 'Diamond': ctx.moveTo(x, y - s); ctx.lineTo(x + s * 0.75, y); ctx.lineTo(x, y + s); ctx.lineTo(x - s * 0.75, y); ctx.closePath(); break;
+      case 'Circle': c.arc(x, y, s, 0, Math.PI * 2); break;
+      case 'Square': c.rect(x - s * 0.85, y - s * 0.85, s * 1.7, s * 1.7); break;
+      case 'Triangle': c.moveTo(x, y - s); c.lineTo(x + s * 0.95, y + s * 0.75); c.lineTo(x - s * 0.95, y + s * 0.75); c.closePath(); break;
+      case 'Diamond': c.moveTo(x, y - s); c.lineTo(x + s * 0.75, y); c.lineTo(x, y + s); c.lineTo(x - s * 0.75, y); c.closePath(); break;
       case 'Star':
-        for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? s * 0.45 : s; ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
-        ctx.closePath(); break;
+        for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? s * 0.45 : s; c.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+        c.closePath(); break;
       case 'Heart':
-        ctx.moveTo(x, y + s * 0.85);
-        ctx.bezierCurveTo(x - s * 1.4, y - s * 0.1, x - s * 0.6, y - s * 1.2, x, y - s * 0.45);
-        ctx.bezierCurveTo(x + s * 0.6, y - s * 1.2, x + s * 1.4, y - s * 0.1, x, y + s * 0.85); break;
+        c.moveTo(x, y + s * 0.85);
+        c.bezierCurveTo(x - s * 1.4, y - s * 0.1, x - s * 0.6, y - s * 1.2, x, y - s * 0.45);
+        c.bezierCurveTo(x + s * 0.6, y - s * 1.2, x + s * 1.4, y - s * 0.1, x, y + s * 0.85); break;
     }
   }
 
-  function drawItem(item, x, y, size, alpha) {
-    ctx.save(); ctx.globalAlpha = alpha;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    if (item.kind === 'emoji') {
-      ctx.fillStyle = '#000'; // color emoji take on the fill's transparency, so keep it solid
-      ctx.font = `${size * 1.2}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
-      ctx.fillText(item.glyph, x, y + size * 0.08);
-    } else if (item.kind === 'text') {
-      ctx.font = `900 ${size * 1.3}px "Arial Rounded MT Bold","Trebuchet MS",sans-serif`;
-      ctx.lineWidth = size * 0.14; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round';
-      ctx.strokeText(item.glyph, x, y + size * 0.06);
-      ctx.fillStyle = item.color; ctx.fillText(item.glyph, x, y + size * 0.06);
-    } else if (item.kind === 'shape') {
-      shapePath(item.shape, x, y, size * 0.6);
-      ctx.fillStyle = item.color; ctx.fill();
-      ctx.lineWidth = size * 0.08; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round'; ctx.stroke();
+  // ---------- Sprites ----------
+  // Every look is painted once to an offscreen canvas and then drawn scaled with drawImage.
+  // buildSprites() clears and rebuilds all of it: call it again whenever the fonts change.
+  const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  const TEXT_FONT = '"Arial Rounded MT Bold","Trebuchet MS",sans-serif';
+  const HUES = 12, STEP = 8; // iridescent hue buckets, and size buckets in css px
+  const bodySprites = new Map(), itemSprites = new Map();
+  let cloudSprites = [];
+  function makeSprite(side) {
+    const c = document.createElement('canvas');
+    c.width = c.height = Math.ceil(side * DPR);
+    const g = c.getContext('2d'); g.scale(DPR, DPR);
+    return { c, g, side };
+  }
+  const bucket = r => Math.max(STEP, Math.ceil(r / STEP) * STEP); // round up so a sprite is only ever scaled down
+
+  function paintBody(g, cx, cy, r, tint, hue) {
+    const grad = g.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);
+    if (tint) {
+      grad.addColorStop(0, 'rgba(255,255,255,0.7)'); grad.addColorStop(0.35, tint); grad.addColorStop(1, tint);
+    } else {
+      grad.addColorStop(0, 'rgba(255,255,255,0.6)');
+      grad.addColorStop(0.7, `hsla(${hue},90%,80%,0.25)`);
+      grad.addColorStop(0.92, `hsla(${hue + 50},95%,72%,0.6)`);
+      grad.addColorStop(1, `hsla(${hue + 100},95%,82%,0.9)`);
     }
-    ctx.restore();
+    g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fillStyle = grad; g.fill();
+    g.lineWidth = 3; g.strokeStyle = 'rgba(255,255,255,0.8)'; g.stroke();
+  }
+  // the bubble body (gradient + rim) at radius R, keyed by tint or hue bucket
+  function bodySprite(b, R) {
+    const tint = b.item.kind === 'color' ? b.item.color : null;
+    const h = Math.round(b.hue / (360 / HUES)) % HUES;
+    const key = (tint || h) + '|' + R;
+    let sp = bodySprites.get(key);
+    if (!sp) {
+      if (bodySprites.size > 300) bodySprites.clear();
+      sp = makeSprite(R * 2 + 6);
+      paintBody(sp.g, sp.side / 2, sp.side / 2, R, tint, h * (360 / HUES));
+      bodySprites.set(key, sp);
+    }
+    return sp;
+  }
+
+  function paintItem(g, item, x, y, size) {
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    if (item.kind === 'emoji') {
+      g.fillStyle = '#000'; // color emoji take on the fill's transparency, so keep it solid
+      g.font = `${size * 1.2}px ${EMOJI_FONT}`;
+      g.fillText(item.glyph, x, y + size * 0.08);
+    } else if (item.kind === 'text') {
+      g.font = `900 ${size * 1.3}px ${TEXT_FONT}`;
+      g.lineWidth = size * 0.14; g.strokeStyle = '#fff'; g.lineJoin = 'round';
+      g.strokeText(item.glyph, x, y + size * 0.06);
+      g.fillStyle = item.color; g.fillText(item.glyph, x, y + size * 0.06);
+    } else if (item.kind === 'shape') {
+      shapePath(g, item.shape, x, y, size * 0.6);
+      g.fillStyle = item.color; g.fill();
+      g.lineWidth = size * 0.08; g.strokeStyle = '#fff'; g.lineJoin = 'round'; g.stroke();
+    }
+  }
+  function itemSprite(item, S) {
+    const key = item.kind + '|' + (item.glyph || item.shape) + '|' + (item.color || '') + '|' + S;
+    let sp = itemSprites.get(key);
+    if (!sp) {
+      if (itemSprites.size > 400) itemSprites.clear();
+      sp = makeSprite(S * 2.4);
+      paintItem(sp.g, item, sp.side / 2, sp.side / 2, S);
+      itemSprites.set(key, sp);
+    }
+    return sp;
+  }
+  function drawItem(item, x, y, size, alpha) {
+    if (item.kind === 'color') return;
+    const S = bucket(size), sp = itemSprite(item, S), k = size / S, w = sp.side * k;
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(sp.c, x - w / 2, y - w / 2, w, w);
+    ctx.globalAlpha = 1;
   }
 
   // soft clouds drifting behind the bubbles, so the sky has some depth
   const CLOUDS = Array.from({ length: 5 }, (_, i) => ({ y: 0.08 + i * 0.17 + Math.random() * 0.06, s: 0.7 + Math.random() * 0.6, x: Math.random(), v: 0.006 + Math.random() * 0.008 }));
-  function drawClouds(now) {
-    ctx.fillStyle = 'rgba(255,255,255,.45)';
-    for (const c of CLOUDS) {
-      const s = unit() * 0.13 * c.s, span = W + s * 5;
-      const x = ((c.x + now / 1000 * c.v) % 1) * span - s * 2.5, y = c.y * H;
-      ctx.beginPath();
-      ctx.arc(x, y, s, 0, 7); ctx.arc(x + s * 1.1, y - s * 0.45, s * 1.25, 0, 7); ctx.arc(x + s * 2.3, y, s * 0.95, 0, 7);
-      ctx.rect(x, y, s * 2.3, s * 0.9); ctx.fill();
+  // one opaque white cloud per sprite: drawn with globalAlpha, so overlapping lobes can't leave seams
+  const CLOUD_BOX = { l: 1.1, t: 1.75, w: 4.4, h: 3 }; // in units of s, around the cloud's left-middle origin
+  function paintCloud(s) {
+    const sp = makeSprite(0), w = CLOUD_BOX.w * s, h = CLOUD_BOX.h * s;
+    sp.c.width = Math.ceil(w * DPR); sp.c.height = Math.ceil(h * DPR);
+    const g = sp.c.getContext('2d'); g.scale(DPR, DPR);
+    const ox = CLOUD_BOX.l * s, oy = CLOUD_BOX.t * s;
+    g.fillStyle = '#fff'; g.beginPath();
+    g.arc(ox, oy, s, 0, 7); g.moveTo(ox + s * 2.35, oy - s * 0.45); g.arc(ox + s * 1.1, oy - s * 0.45, s * 1.25, 0, 7);
+    g.moveTo(ox + s * 3.25, oy); g.arc(ox + s * 2.3, oy, s * 0.95, 0, 7);
+    g.moveTo(ox + s * 2.7, oy + s * 0.25); g.ellipse(ox + s * 1.15, oy + s * 0.25, s * 1.55, s * 0.8, 0, 0, 7); // rounded base instead of a flat edge
+    g.fill();
+    return { c: sp.c, w, h, ox, oy };
+  }
+
+  function buildSprites() {
+    bodySprites.clear(); itemSprites.clear();
+    cloudSprites = CLOUDS.map(c => paintCloud(unit() * 0.13 * c.s));
+    // warm the common bubble looks so the first pops don't hitch
+    const r0 = baseR();
+    for (const k of [0.7, 0.8, 1, 1.25, 1.75]) {
+      const R = bucket(r0 * k + 2);
+      for (let h = 0; h < HUES; h++) bodySprite({ hue: h * (360 / HUES), item: { kind: 'emoji' } }, R);
     }
+  }
+
+  function drawClouds(now) {
+    ctx.globalAlpha = 0.45;
+    CLOUDS.forEach((c, i) => {
+      const sp = cloudSprites[i], s = unit() * 0.13 * c.s, span = W + s * 5;
+      const x = ((c.x + now / 1000 * c.v) % 1) * span - s * 2.5, y = c.y * H;
+      ctx.drawImage(sp.c, x - sp.ox, y - sp.oy, sp.w, sp.h);
+    });
+    ctx.globalAlpha = 1;
   }
 
   function drawBubble(b, now) {
@@ -402,19 +488,9 @@
       ctx.beginPath(); ctx.arc(b.x, b.y, r * (1.12 + k * 0.08), 0, Math.PI * 2);
       ctx.lineWidth = 6; ctx.strokeStyle = `rgba(255,210,63,${0.5 + k * 0.5})`; ctx.stroke();
     }
-    const tint = b.item.kind === 'color' ? b.item.color : null;
-    const g = ctx.createRadialGradient(b.x - r * 0.35, b.y - r * 0.35, r * 0.1, b.x, b.y, r);
-    if (tint) {
-      g.addColorStop(0, 'rgba(255,255,255,0.7)'); g.addColorStop(0.35, tint); g.addColorStop(1, tint);
-    } else {
-      g.addColorStop(0, 'rgba(255,255,255,0.6)');
-      g.addColorStop(0.7, `hsla(${b.hue},90%,80%,0.25)`);
-      g.addColorStop(0.92, `hsla(${b.hue + 50},95%,72%,0.6)`);
-      g.addColorStop(1, `hsla(${b.hue + 100},95%,82%,0.9)`);
-    }
-    ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
-    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.stroke();
-    if (!tint) drawItem(b.item, b.x, b.y, r * 0.75, 0.95);
+    const R = bucket(b.r * 1.04 + 2), sp = bodySprite(b, R), k = r / R, w = sp.side * k;
+    ctx.drawImage(sp.c, b.x - w / 2, b.y - w / 2, w, w);
+    if (b.item.kind !== 'color') drawItem(b.item, b.x, b.y, r * 0.75, 0.95);
     ctx.beginPath(); ctx.ellipse(b.x - r * 0.4, b.y - r * 0.45, r * 0.22, r * 0.11, -0.7, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
   }
@@ -554,6 +630,7 @@
   };
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
 
+  resize(); // sizes the canvas and builds the sprites
   // start with the sky already full
   for (let i = 0, n = maxBubbles(); i < n; i++) spawnBubble(undefined, H * (0.1 + 0.9 * (i + Math.random()) / n), { giant: false });
   newTarget();
