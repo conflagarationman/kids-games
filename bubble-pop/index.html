@@ -1130,7 +1130,7 @@
     ctx.clearRect(0, 0, W, H);
     drawSky(now);
     for (const b of bubbles) drawBubble(b, now);
-    drawBoss(); drawBossHint(); drawCard();
+    drawBoss(); drawBossHint();
     for (const p of particles) {
       const k = 1 - p.t / p.life;
       ctx.fillStyle = `hsla(${p.hue},95%,${p.star ? 90 : 75}%,${k})`;
@@ -1161,6 +1161,7 @@
       }
       ctx.restore();
     }
+    drawCard(); // the level card sits above popped surprises so "Level N" always reads
     for (const c of confetti) {
       ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot); ctx.fillStyle = c.color;
       ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h); ctx.restore();
