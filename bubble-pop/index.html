@@ -133,7 +133,7 @@
     SAT = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sat')) || 0; // notch height, for the Find it badge
     cv.width = W * dpr; cv.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (typeof buildSprites === 'function') buildSprites(); // unit() changed, so the cloud sprites and size buckets change too
+    if (typeof buildSprites === 'function') buildSprites(true); // unit() changed, so the clouds (and maybe the master sizes) change too
   }
   addEventListener('resize', resize);
   const unit = () => Math.min(W, H);
@@ -370,22 +370,26 @@
   }
 
   // ---------- Sprites ----------
-  // Every look is painted once to an offscreen canvas and then drawn scaled with drawImage.
-  // buildSprites() clears and rebuilds all of it: call it again whenever the fonts change.
+  // Every look is painted once into ONE master canvas and drawn scaled with drawImage (mostly scaled down).
+  // buildSprites() clears and rebuilds the lot: call it again whenever the fonts change.
+  // Memory matters here (iOS Safari kills pages that use too much canvas), so: one master per look, glyph
+  // masters cropped to the glyph, bubble bodies without the rim (that is one live stroke), clouds at half size.
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
   const TEXT_FONT = '"Arial Rounded MT Bold","Trebuchet MS",sans-serif';
-  const HUES = 8, STEP = 24, ITEM_STEP = 16; // coarse buckets keep the warmed cache small; sprites are only ever scaled down // iridescent hue buckets, and size buckets in css px
+  const HUES = 12, CLOUD_RES = 0.5;
   const bodySprites = new Map(), itemSprites = new Map();
   let cloudSprites = [];
-  function makeSprite(side) {
+  let RM = 0, SM = 0, spriteDPR = 0; // master sizes: a body's radius, a glyph's size; both in css px
+  // w and h are in css px, rounded up to whole device pixels so every blit is 1:1
+  function makeSprite(w, h) {
+    const pw = Math.ceil(w * DPR), ph = Math.ceil(h * DPR);
     const c = document.createElement('canvas');
-    c.width = c.height = Math.round(side * DPR);
+    c.width = pw; c.height = ph;
     const g = c.getContext('2d'); g.scale(DPR, DPR);
-    return { c, g, side };
+    return { c, g, w: pw / DPR, h: ph / DPR };
   }
-  const bucket = (r, step = STEP) => Math.max(step, Math.ceil(r / step) * step); // round up so a sprite is only ever scaled down
 
-  function paintBody(g, cx, cy, r, tint, hue) {
+  function paintBody(g, cx, cy, r, tint, hue, rim) {
     const grad = g.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);
     if (tint) {
       grad.addColorStop(0, 'rgba(255,255,255,0.7)'); grad.addColorStop(0.35, tint); grad.addColorStop(1, tint);
@@ -396,15 +400,18 @@
       grad.addColorStop(1, `hsla(${hue + 100},95%,82%,0.9)`);
     }
     g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fillStyle = grad; g.fill();
-    g.lineWidth = 3; g.strokeStyle = 'rgba(255,255,255,0.8)'; g.stroke();
+    if (rim) strokeRim(g, cx, cy, r);
   }
-  // the bubble body (gradient + rim) at radius R, keyed by tint or hue bucket
+  function strokeRim(g, x, y, r) {
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.lineWidth = 3; g.strokeStyle = 'rgba(255,255,255,0.8)'; g.stroke();
+  }
   const hueOf = b => Math.round(b.hue / (360 / HUES)) % HUES;
-  const bodyKey = (tint, h, R) => (tint || h) + '|' + R;
-  function bodySprite(b, R) {
-    const tint = b.item.kind === 'color' ? b.item.color : null, h = hueOf(b);
-    const key = bodyKey(tint, h, R), sp = bodySprites.get(key);
-    if (!sp) want({ key, type: 'body', R, tint, h }, true);
+  const bodyKey = (tint, h) => String(tint || h);
+  // the bubble body: a smooth gradient, so one master at 1 px per css px is enough; the rim is drawn live
+  function bodySprite(b) {
+    const tint = b.item.kind === 'color' ? b.item.color : null, key = bodyKey(tint, hueOf(b));
+    const sp = bodySprites.get(key);
+    if (!sp) want({ key, type: 'body', tint, h: hueOf(b) }, true);
     return sp;
   }
 
@@ -423,73 +430,80 @@
       g.fillStyle = item.color; g.fill();
     }
   }
+  // half the width and height a glyph covers around its center, in units of its size (shapes) or measured (text)
+  const SHAPE_EXT = { Circle: [0.6, 0.6], Square: [0.51, 0.51], Triangle: [0.57, 0.6], Diamond: [0.45, 0.6], Star: [0.6, 0.6], Heart: [0.84, 0.6] };
+  const measurer = document.createElement('canvas').getContext('2d');
+  function glyphExtent(item, S) {
+    if (item.kind === 'emoji') return [S * 0.62, S * 0.62];
+    if (item.kind === 'shape') return [SHAPE_EXT[item.shape][0] * S, SHAPE_EXT[item.shape][1] * S];
+    measurer.font = `900 ${S * 1.3}px ${TEXT_FONT}`; measurer.textAlign = 'center'; measurer.textBaseline = 'middle';
+    const t = measurer.measureText(item.glyph);
+    return [Math.max(t.actualBoundingBoxLeft, t.actualBoundingBoxRight), Math.max(t.actualBoundingBoxAscent, t.actualBoundingBoxDescent) + S * 0.06];
+  }
+
   // sticker look shared by every game: white outline (6% of size, at least 2px) stamped from the
   // glyph's silhouette at 16 offsets, over a soft shadow, all baked into the sprite.
-  // Built as a job that does a few stamps per call, so a big sprite never costs one long frame.
+  // Built as a job that does a few stamps per call, so a master never costs one long frame.
+  // One master per glyph serves every size: the outline stays 6% of the glyph when it is scaled.
   const STAMPS = 16;
-  function startSticker(item, S) {
-    const side = Math.ceil(S * 1.6 * DPR) / DPR, c = side / 2, sp = makeSprite(side); // whole device pixels, so every stamp is a 1:1 blit
-    // three scratch layers, reused so a build doesn't allocate big canvases
-    const [glyph, sil, ring] = scratch(side);
-    for (const l of [glyph, sil, ring]) { l.g.setTransform(DPR, 0, 0, DPR, 0, 0); l.g.clearRect(0, 0, side, side); }
-    paintGlyph(glyph.g, item, c, c, S);
-    sil.g.globalCompositeOperation = 'source-over';
-    sil.g.drawImage(glyph.c, 0, 0, side, side);
-    sil.g.globalCompositeOperation = 'source-in'; sil.g.fillStyle = '#fff'; sil.g.fillRect(0, 0, side, side); // white silhouette
-    return { sp, glyph, sil, ring, item, S, side, k: 0 };
+  let layers = null; // three scratch layers shared by every build
+  function scratch() {
+    if (!layers) { const side = 2.4 * SM; layers = [makeSprite(side, side), makeSprite(side, side), makeSprite(side, side)]; }
+    return layers;
+  }
+  function startSticker(item) {
+    const S = SM, [hw, hh] = glyphExtent(item, S), pad = S * 0.2, [glyph, sil, ring] = scratch();
+    const sp = makeSprite(Math.min(2 * (hw + pad), glyph.w), Math.min(2 * (hh + pad), glyph.h)), w = sp.w, h = sp.h;
+    for (const l of [glyph, sil, ring]) { l.g.setTransform(DPR, 0, 0, DPR, 0, 0); l.g.globalCompositeOperation = 'source-over'; l.g.clearRect(0, 0, w, h); }
+    paintGlyph(glyph.g, item, w / 2, h / 2, S);
+    sil.g.drawImage(glyph.c, 0, 0, sp.c.width, sp.c.height, 0, 0, w, h);
+    sil.g.globalCompositeOperation = 'source-in'; sil.g.fillStyle = '#fff'; sil.g.fillRect(0, 0, w, h); // white silhouette
+    return { sp, glyph, sil, ring, item, S, k: 0 };
   }
   // returns true when the sprite is finished
   function stepSticker(j, stamps) {
-    const o = Math.max(2, j.S * 0.06);
+    const { sp, S } = j, pw = sp.c.width, ph = sp.c.height, o = Math.max(2, S * 0.06);
     for (let n = 0; n < stamps && j.k < STAMPS; n++, j.k++) {
       const a = j.k / STAMPS * Math.PI * 2; // whole device pixels: a fractional offset makes each blit 10x slower
-      j.ring.g.drawImage(j.sil.c, Math.round(Math.cos(a) * o * DPR) / DPR, Math.round(Math.sin(a) * o * DPR) / DPR, j.side, j.side);
+      j.ring.g.drawImage(j.sil.c, 0, 0, pw, ph, Math.round(Math.cos(a) * o * DPR) / DPR, Math.round(Math.sin(a) * o * DPR) / DPR, sp.w, sp.h);
     }
     if (j.k < STAMPS) return false;
-    const g = j.sp.g;
+    const g = sp.g;
     g.save();
-    g.shadowColor = 'rgba(43,45,92,.25)'; g.shadowOffsetY = j.S * 0.03 * DPR; g.shadowBlur = j.S * 0.04 * DPR;
-    g.drawImage(j.ring.c, 0, 0, j.side, j.side);
+    g.shadowColor = 'rgba(43,45,92,.25)'; g.shadowOffsetY = S * 0.03 * DPR; g.shadowBlur = S * 0.04 * DPR;
+    g.drawImage(j.ring.c, 0, 0, pw, ph, 0, 0, sp.w, sp.h);
     g.restore();
-    if (j.item.kind === 'emoji') g.drawImage(j.glyph.c, 0, 0, j.side, j.side); // letters and shapes get their color live, so one sprite serves every color
+    if (j.item.kind === 'emoji') g.drawImage(j.glyph.c, 0, 0, pw, ph, 0, 0, sp.w, sp.h); // letters and shapes get their color live, so one master serves every color
     return true;
   }
-  const scratchLayers = new Map(); // by sprite side, so each layer is exactly the size it is read at
-  function scratch(side) {
-    let l = scratchLayers.get(side);
-    if (!l) scratchLayers.set(side, l = [makeSprite(side), makeSprite(side), makeSprite(side)]);
-    return l;
-  }
+
   // ---- keeping the caches warm ----
-  // Nothing is ever built inside a frame that draws. buildSprites() queues every sprite the current mode
+  // Nothing is ever built inside a frame that draws. buildSprites() queues every master the current mode
   // can need; the loop builds them a little per frame, urgent requests (a bubble that just spawned, a new
-  // target) first. Until a sprite is ready it is drawn the old way, uncached.
-  const MAX_ITEM = 112; // a giant's reveal is scaled up a little rather than building a huge sprite
-  // letters, numbers and shapes are colorless outlines with the fill drawn live on top: one sprite per glyph
-  // instead of one per glyph and color, which keeps the cache around 50-120MB instead of several hundred
-  const itemKey = (item, S) => item.kind + '|' + (item.glyph || item.shape) + '|' + S;
+  // target) first. Until a master is ready it is drawn the old way, uncached.
+  const itemKey = item => item.kind + '|' + (item.glyph || item.shape);
   const urgent = new Map(), warm = [], queued = new Set();
-  let job = null; // the item sprite being built, a few stamps per frame
-  let SB = 0, SR = 0, SK = 0; // item sprite sizes: in a bubble, in the pop reveal, in the Find it badge
+  let job = null; // the item master being built, a few stamps per frame
   function want(task, now) {
-    if (queued.has(task.key)) return;
+    if (queued.has(task.key) || bodySprites.has(task.key) || itemSprites.has(task.key)) return;
     queued.add(task.key);
     if (now) urgent.set(task.key, task); else warm.push(task);
   }
-  function itemSprite(item, S) {
-    const key = itemKey(item, S), sp = itemSprites.get(key);
-    if (!sp) want({ key, type: 'item', item, S }, true);
+  function itemSprite(item) {
+    const key = itemKey(item), sp = itemSprites.get(key);
+    if (!sp) want({ key, type: 'item', item }, true);
     return sp;
   }
   function build(task) {
     if (task.type === 'body') {
-      if (bodySprites.size > 300) bodySprites.clear();
-      const sp = makeSprite(task.R * 2 + 6);
-      paintBody(sp.g, sp.side / 2, sp.side / 2, task.R, task.tint, task.h * (360 / HUES));
-      bodySprites.set(task.key, sp); queued.delete(task.key);
-    } else job = { task, j: startSticker(task.item, task.S) };
+      const side = RM * 2 + 2, c = document.createElement('canvas'); // 1 px per css px: a gradient needs no more
+      c.width = c.height = side;
+      const g = c.getContext('2d');
+      paintBody(g, side / 2, side / 2, RM, task.tint, task.h * (360 / HUES), false);
+      bodySprites.set(task.key, { c, w: side, h: side }); queued.delete(task.key);
+    } else job = { task, j: startSticker(task.item) };
   }
-  // one step of work: finish a few stamps of the current sprite, or start the next one
+  // one step of work: finish a few stamps of the current master, or start the next one
   function buildStep(stamps = 3) {
     if (!job) {
       let t;
@@ -498,10 +512,7 @@
       if (!t) return;
       build(t); if (!job) return;
     }
-    if (stepSticker(job.j, stamps)) {
-      if (itemSprites.size > 400) itemSprites.clear();
-      itemSprites.set(job.task.key, job.j.sp); queued.delete(job.task.key); job = null;
-    }
+    if (stepSticker(job.j, stamps)) { itemSprites.set(job.task.key, job.j.sp); queued.delete(job.task.key); job = null; }
   }
   // Builds happen after a frame is drawn, in a small time slice (smaller when frames are already slow),
   // never inside the drawing itself
@@ -510,7 +521,6 @@
     const t0 = performance.now();
     do buildStep(4); while (hasWork() && performance.now() - t0 < ms);
   }
-  const itemBucket = (r, mult) => Math.min(MAX_ITEM, bucket(r * mult, ITEM_STEP));
   const warmItems = () => {
     const m = settings.mode, all = m === 'mix', out = [];
     if (all || m === 'animals') for (const a of ANIMALS) out.push({ kind: 'emoji', glyph: a[0] });
@@ -519,31 +529,22 @@
     if (all || m === 'shapes') for (const sh of SHAPES) out.push({ kind: 'shape', shape: sh });
     return out;
   };
-  function warmUp(resized) {
-    itemSprites.clear(); job = null; urgent.clear(); warm.length = 0; queued.clear(); scratchLayers.clear();
-    const r0 = baseR();
-    SB = itemBucket(r0, 1); SR = itemBucket(r0, 1.75); SK = 48;
-    {
-      if (resized) bodySprites.clear(); // sizes changed; on a mode change the hue bodies are still good
-      const tints = settings.mode === 'colors' || settings.mode === 'mix' ? COLORS.map(c => c[1]) : [];
-      for (let R = bucket(r0 * 0.7 * 1.04 + 2); R <= bucket(r0 * 1.75 * 1.04 + 2); R += STEP) {
-        for (let h = 0; h < HUES; h++) want({ key: bodyKey(null, h, R), type: 'body', R, tint: null, h });
-        for (const t of tints) want({ key: bodyKey(t, 0, R), type: 'body', R, tint: t, h: 0 });
-      }
-    }
-    const items = warmItems();
-    for (const it of items) want({ key: itemKey(it, SB), type: 'item', item: it, S: SB });
-    for (const it of items) want({ key: itemKey(it, SR), type: 'item', item: it, S: SR });
-    for (const it of items) want({ key: itemKey(it, SK), type: 'item', item: it, S: SK }); // the Find it badge
+  // queue what the current mode needs (bodies first: every bubble has one)
+  function queueWarm() {
+    const tints = settings.mode === 'colors' || settings.mode === 'mix' ? COLORS.map(c => c[1]) : [];
+    for (let h = 0; h < HUES; h++) want({ key: bodyKey(null, h), type: 'body', tint: null, h });
+    for (const t of tints) want({ key: bodyKey(t, 0), type: 'body', tint: t, h: 0 });
+    for (const it of warmItems()) want({ key: itemKey(it), type: 'item', item: it });
   }
   // for ?debug: how much is cached, and how much is still waiting to be built
   function cacheStats() {
     let bytes = 0;
     for (const m of [itemSprites, bodySprites]) for (const sp of m.values()) bytes += sp.c.width * sp.c.height * 4;
     for (const c of cloudSprites) bytes += c.c.width * c.c.height * 4;
+    if (layers) for (const l of layers) bytes += l.c.width * l.c.height * 4;
     return { items: itemSprites.size, bodies: bodySprites.size, mb: +(bytes / 1048576).toFixed(1), waiting: urgent.size + warm.length + (job ? 1 : 0) };
   }
-  // the old way, for the moments before a sprite is ready
+  // the old way, for the moments before a master is ready
   function drawItemDirect(item, x, y, size) {
     ctx.save();
     if (item.kind === 'text') {
@@ -554,15 +555,15 @@
     if (item.kind === 'shape') { ctx.lineWidth = size * 0.08; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round'; ctx.stroke(); }
     ctx.restore();
   }
-  // S is the size the sprite was built for (SB, SR or SK): drawing only ever scales it down
-  function drawItem(item, x, y, size, alpha, S) {
+  // size is the glyph size it is drawn at (bubble, reveal or badge); the master is scaled to it
+  function drawItem(item, x, y, size, alpha) {
     if (item.kind === 'color') return;
-    const sp = itemSprite(item, S);
+    const sp = itemSprite(item);
     ctx.globalAlpha = alpha;
     if (!sp) drawItemDirect(item, x, y, size);
     else {
-      const w = sp.side * size / S;
-      ctx.drawImage(sp.c, x - w / 2, y - w / 2, w, w);
+      const k = size / SM, w = sp.w * k, h = sp.h * k;
+      ctx.drawImage(sp.c, x - w / 2, y - h / 2, w, h);
       if (item.kind !== 'emoji') { ctx.save(); paintGlyph(ctx, item, x, y, size); ctx.restore(); } // letters and shapes: color drawn live on the baked outline
     }
     ctx.globalAlpha = 1;
@@ -570,24 +571,31 @@
 
   // soft clouds drifting behind the bubbles, so the sky has some depth
   const CLOUDS = Array.from({ length: 5 }, (_, i) => ({ y: 0.08 + i * 0.17 + Math.random() * 0.06, s: 0.7 + Math.random() * 0.6, x: Math.random(), v: 0.006 + Math.random() * 0.008 }));
-  // one opaque white cloud per sprite: drawn with globalAlpha, so overlapping lobes can't leave seams
+  // one opaque white cloud per master: drawn with globalAlpha, so overlapping lobes can't leave seams.
+  // Half size is plenty for something this soft and a fifth of the memory.
   const CLOUD_BOX = { l: 1.1, t: 1.75, w: 4.4, h: 3 }; // in units of s, around the cloud's left-middle origin
   function paintCloud(s) {
-    const sp = makeSprite(0), w = CLOUD_BOX.w * s, h = CLOUD_BOX.h * s;
-    sp.c.width = Math.ceil(w * DPR); sp.c.height = Math.ceil(h * DPR);
-    const g = sp.c.getContext('2d'); g.scale(DPR, DPR);
+    const w = CLOUD_BOX.w * s, h = CLOUD_BOX.h * s, c = document.createElement('canvas');
+    c.width = Math.ceil(w * CLOUD_RES); c.height = Math.ceil(h * CLOUD_RES);
+    const g = c.getContext('2d'); g.scale(CLOUD_RES, CLOUD_RES);
     const ox = CLOUD_BOX.l * s, oy = CLOUD_BOX.t * s;
     g.fillStyle = '#fff'; g.beginPath();
     g.arc(ox, oy, s, 0, 7); g.moveTo(ox + s * 2.35, oy - s * 0.45); g.arc(ox + s * 1.1, oy - s * 0.45, s * 1.25, 0, 7);
     g.moveTo(ox + s * 3.25, oy); g.arc(ox + s * 2.3, oy, s * 0.95, 0, 7);
     g.moveTo(ox + s * 2.7, oy + s * 0.25); g.ellipse(ox + s * 1.15, oy + s * 0.25, s * 1.55, s * 0.8, 0, 0, 7); // rounded base instead of a flat edge
     g.fill();
-    return { c: sp.c, w, h, ox, oy };
+    return { c, w, h, ox, oy };
   }
 
-  function buildSprites() {
+  // keep = true on a resize: the masters only change when their size or the pixel ratio does
+  function buildSprites(keep) {
     cloudSprites = CLOUDS.map(c => paintCloud(unit() * 0.13 * c.s));
-    warmUp(true);
+    const rm = Math.ceil(baseR() * 1.25 * 1.04) + 1, sm = Math.min(76, Math.round(baseR() * 1.75));
+    if (!keep || rm !== RM || sm !== SM || DPR !== spriteDPR) {
+      bodySprites.clear(); itemSprites.clear(); urgent.clear(); warm.length = 0; queued.clear(); job = null; layers = null;
+    }
+    RM = rm; SM = sm; spriteDPR = DPR;
+    queueWarm();
   }
 
   function drawClouds(now) {
@@ -609,10 +617,10 @@
       ctx.beginPath(); ctx.arc(b.x, b.y, r * (1.12 + k * 0.08), 0, Math.PI * 2);
       ctx.lineWidth = 6; ctx.strokeStyle = `rgba(255,210,63,${0.5 + k * 0.5})`; ctx.stroke();
     }
-    const R = bucket(b.r * 1.04 + 2), sp = bodySprite(b, R);
-    if (sp) { const w = sp.side * r / R; ctx.drawImage(sp.c, b.x - w / 2, b.y - w / 2, w, w); }
-    else paintBody(ctx, b.x, b.y, r, b.item.kind === 'color' ? b.item.color : null, hueOf(b) * (360 / HUES)); // not warmed yet
-    if (b.item.kind !== 'color') drawItem(b.item, b.x, b.y, r * 0.75, 0.95, SB);
+    const sp = bodySprite(b);
+    if (sp) { const w = sp.w * r / RM; ctx.drawImage(sp.c, b.x - w / 2, b.y - w / 2, w, w); strokeRim(ctx, b.x, b.y, r); }
+    else paintBody(ctx, b.x, b.y, r, b.item.kind === 'color' ? b.item.color : null, hueOf(b) * (360 / HUES), true); // not warmed yet
+    if (b.item.kind !== 'color') drawItem(b.item, b.x, b.y, r * 0.75, 0.95);
     ctx.beginPath(); ctx.ellipse(b.x - r * 0.4, b.y - r * 0.45, r * 0.22, r * 0.11, -0.7, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
   }
@@ -677,7 +685,7 @@
         ctx.beginPath(); ctx.arc(0, 0, size * 0.6, 0, Math.PI * 2); ctx.fillStyle = r.item.color; ctx.fill();
         ctx.lineWidth = 5; ctx.strokeStyle = '#fff'; ctx.stroke();
       } else {
-        drawItem(r.item, 0, 0, size, alpha, SR);
+        drawItem(r.item, 0, 0, size, alpha);
       }
       // numbers: show that many dots so counting is concrete
       if (r.item.count) {
@@ -711,7 +719,7 @@
     if (target.kind === 'color') {
       ctx.beginPath(); ctx.arc(s * 0.35, 0, s * 0.42, 0, Math.PI * 2); ctx.fillStyle = target.color; ctx.fill();
       ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(43,45,92,.3)'; ctx.stroke();
-    } else drawItem(target, s * 0.35, 0, s * 0.62, 1, SK);
+    } else drawItem(target, s * 0.35, 0, s * 0.62, 1);
     ctx.restore();
   }
 
@@ -739,7 +747,7 @@
   document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
     settings.mode = b.dataset.mode; saveSettings(); syncPanel();
     for (const bb of bubbles) bb.item = makeItem(settings.mode); // switch what's on screen right away
-    warmUp(false); // the new mode's glyphs (and tinted bodies) get warmed
+    queueWarm(); // the new mode's glyphs (and tinted bodies) get warmed
     target = null; newTarget();
   });
   document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { settings.speed = +b.dataset.speed; saveSettings(); syncPanel(); });
