@@ -160,6 +160,8 @@
   function resize() {
     dpr = Math.min(devicePixelRatio || 1, 2);
     W = innerWidth; H = innerHeight;
+    for (const sp of stickers.values()) sp.c.width = 0; // size buckets change with the screen
+    stickers.clear();
     // keep the picture when the screen rotates or resizes
     const keep = document.createElement('canvas');
     keep.width = paint.width; keep.height = paint.height;
@@ -327,7 +329,8 @@
   function addStamp(x, y) {
     dirty = true;
     stampSound();
-    stamps.push({ x, y, glyph: pick(STAMPS[settings.stamps] || STAMPS.mix), t: 0, size: unit() * (0.11 + Math.random() * 0.05), rot: (Math.random() - 0.5) * 0.5 });
+    // a few set sizes, so the sticker cache gets hits
+    stamps.push({ x, y, glyph: pick(STAMPS[settings.stamps] || STAMPS.mix), t: 0, size: unit() * (0.11 + ((Math.random() * 4) | 0) * 0.05 / 3), rot: (Math.random() - 0.5) * 0.5 });
     burst(x, y, 12, unit() * 0.3);
   }
 
@@ -338,11 +341,39 @@
     }
   }
 
+  // ---------- Sticker emoji ----------
+  // Same look as the other games: the emoji with a white outline (its silhouette stamped in white at 16 points around a circle)
+  // and a soft shadow, drawn once to a small canvas and reused. Cached by glyph and size, rounded up to a multiple of 8px.
+  const stickers = new Map(), STICKER_MAX = 24; // a Map keeps insertion order, so the oldest-used one is first
+  function sticker(glyph, size) {
+    // drawn big enough for the pop-in (1.3x) so it is only ever scaled down
+    const em = Math.ceil(size * 1.3 * dpr / 8) * 8, key = glyph + '|' + em;
+    let sp = stickers.get(key);
+    if (sp) { stickers.delete(key); stickers.set(key, sp); return sp; }
+    const o = Math.max(2, em * 0.06), pad = Math.ceil(o + em * 0.08), side = Math.ceil(em * 1.25) + pad * 2, mid = side / 2;
+    const mk = () => { const c = document.createElement('canvas'); c.width = c.height = side; return c; };
+    const glyphAt = g => { g.font = `${em}px ${EMOJI}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#000'; g.fillText(glyph, mid, mid); }; // black first: keeps emoji fully opaque
+    const sil = mk(), sg = sil.getContext('2d');
+    glyphAt(sg); sg.globalCompositeOperation = 'source-in'; sg.fillStyle = '#fff'; sg.fillRect(0, 0, side, side);
+    const ring = mk(), rg = ring.getContext('2d');
+    for (let i = 0; i < 16; i++) { const a = i / 16 * TAU; rg.drawImage(sil, Math.cos(a) * o, Math.sin(a) * o); }
+    rg.drawImage(sil, 0, 0);
+    const c = mk(), g = c.getContext('2d');
+    g.shadowColor = 'rgba(43,45,92,.25)'; g.shadowOffsetY = em * 0.03; g.shadowBlur = em * 0.04;
+    g.drawImage(ring, 0, 0);
+    g.shadowColor = 'transparent'; g.shadowBlur = g.shadowOffsetY = 0;
+    glyphAt(g);
+    sil.width = ring.width = 0; // the two helpers are not needed again
+    sp = { c, em, side };
+    stickers.set(key, sp);
+    if (stickers.size > STICKER_MAX) { const old = stickers.keys().next().value; stickers.get(old).c.width = 0; stickers.delete(old); }
+    return sp;
+  }
   function drawStamp(g, s, scale) {
+    const sp = sticker(s.glyph, s.size), w = sp.side * s.size * scale / sp.em; // the sprite's size on screen, in css px
     g.save(); g.translate(s.x, s.y); g.rotate(s.rot);
-    g.font = `${s.size * scale}px ${EMOJI}`;
-    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#000'; // keep emoji fully opaque
-    g.fillText(s.glyph, 0, s.size * 0.06);
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(sp.c, -w / 2, -w / 2 + s.size * 0.06, w, w);
     g.restore();
   }
 
