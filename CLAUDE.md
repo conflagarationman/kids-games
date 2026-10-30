@@ -10,6 +10,8 @@ Touch web games for the owner's young kids (about 18 months to 5 years; the olde
 
 ```
 index.html              home page: one illustrated tile per game, plus its own ⚙️ for Play time
+sw.js  manifest.webmanifest  icon-180.png  icon-192.png  icon-512.png
+                        the home page's offline cache and home-screen install ("Kids Games")
 shared/                 used by every page: KidsRounded.woff2 (+ OFL license), grownup.js, grownup.css
 README.md               game list (keep in sync when adding or changing a game)
 ROADMAP.md              backlog, ideas, history, open questions
@@ -58,6 +60,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Offline (`sw.js`):** stale-while-revalidate over a fixed `FILES` list.
   - **Prefix cleanup:** all games share one origin, so `activate` may delete only caches starting with that game's prefix (`k.startsWith('<game>-')`). Never delete other games' caches.
   - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v7`, `magic-paint-v9`, `little-band-v8`, `web-hero-v6`. Bumping gets installed copies to update.
+  - **Home page:** the root `sw.js` (cache `home-v1`, prefix `home-`) caches the home page, its covers and tile icons, `shared/` and the unlisted `verses/` page. The home page also registers every game's own worker (`register('<game>/sw.js', { scope: '<game>/' })`), so one visit to the home page online makes every game work offline. Each game's narrower scope wins inside its folder. Bump `home-v*` whenever anything the root `FILES` lists changes.
   - **New files:** add any file the game needs to `FILES`. Every game also lists `../shared/KidsRounded.woff2`, `../shared/grownup.js` and `../shared/grownup.css` (same origin, so the paths work).
 - **Look:** soft pastel gradients and white-outlined shapes. Fonts are "Trebuchet MS" for UI and "Kids Rounded" (bundled Nunito ExtraBold, then "Arial Rounded MT Bold") for big glyphs; ink is `#2b2d5c`; the bright palette is `#ff3b3b #ff9a1f #f5c800 #22b84a #2f7bff #a04dff #ff4fb0`.
 
@@ -73,7 +76,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 
 1. **Make the folder:** create `<game>/` with `index.html`, the manifest, `sw.js` (new prefix) and icons. Include the shared font and timer as described in the shared section above. Draw the icons with Python PIL, flat shapes on a gradient like the others, and avoid looking like any brand.
 2. **Draw the cover:** `<game>/cover.svg`, 800x500, in the same polished style as the existing covers. Render it in the browser and refine it.
-3. **Add the home tile:** in `index.html`, copy an `<a class="game">` tile and set `--accent`/`--tint`, the cover, icon, title and a one-line description.
+3. **Add the home tile:** in `index.html`, copy an `<a class="game">` tile and set `--accent`/`--tint`, the cover, icon, title and a one-line description. Add the game's folder to the home page's worker list (the Offline section of its script), add its `cover.svg` and `icon-192.png` to the root `sw.js` `FILES`, and bump `home-v*`.
 4. **Update the docs:** add the game to `README.md` and to the game notes below. Move its ROADMAP entry to History.
 5. **Test** at every size (below), then commit and push.
 

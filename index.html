@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Kids Games</title>
 <meta name="theme-color" content="#8fd8ff">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kids Games">
 <link rel="preload" href="shared/KidsRounded.woff2" as="font" type="font/woff2" crossorigin>
 <style>
   @font-face { font-family: "Kids Rounded"; src: url("shared/KidsRounded.woff2") format("woff2"); font-weight: 100 900; font-display: block; }
@@ -113,6 +117,15 @@
   pb.addEventListener('pointerup', endHold); pb.addEventListener('pointerleave', endHold); pb.addEventListener('pointercancel', endHold);
   function openPanel() { endHold(); panel.classList.add('open'); }
   document.getElementById('done').onclick = () => panel.classList.remove('open');
+
+  // ---------- Offline ----------
+  // This page's own cache, plus every game's: registering each game's worker here means one visit online
+  // makes all of them work offline, even games nobody has opened yet. Only works over HTTPS or localhost.
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+    addEventListener('load', () => ['bubble-pop', 'magic-paint', 'little-band', 'web-hero'].forEach(g =>
+      navigator.serviceWorker.register(`${g}/sw.js`, { scope: `${g}/` }).catch(() => {})));
+  }
 })();
 </script>
 </body>

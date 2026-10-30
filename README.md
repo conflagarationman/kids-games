@@ -1,6 +1,6 @@
 # kids-games
 
-Simple, touch-friendly web games for little kids. Each game is a self-contained folder of static files (no build step) that can be installed to a phone or tablet home screen and works offline.
+Simple, touch-friendly web games for little kids. Each game is a self-contained folder of static files (no build step) that can be installed to a phone or tablet home screen and works offline. Add the home page itself to the home screen (it installs as "Kids Games") and open it once while online: that saves every game for offline play.
 
 ## Games
 
