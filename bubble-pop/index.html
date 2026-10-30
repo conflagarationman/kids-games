@@ -240,6 +240,7 @@
       hue: (Math.random() * 360) | 0,
       born: performance.now(),
     });
+    const nb = bubbles[bubbles.length - 1]; itemSprite(nb.item, itemBucket(nb.r, 0.8)); itemSprite(nb.item, itemBucket(nb.r, 1.4));
   }
 
   function addConfetti(x, y, spreadX, minVy) {
@@ -261,7 +262,8 @@
     target = t; wrongRun = 0; hintGlow = 0;
     // make sure a couple are already on screen, in easy reach
     const mid = bubbles.filter(b => b.y > H * 0.3 && b.y < H * 0.85 && !b.giant).sort(() => Math.random() - 0.5);
-    for (const b of mid.slice(0, 2)) b.item = copyOf(target);
+    for (const b of mid.slice(0, 2)) { b.item = copyOf(target); itemSprite(b.item, itemBucket(b.r, 0.8)); itemSprite(b.item, itemBucket(b.r, 1.4)); }
+    flushPending(); // the target's bubbles are on screen right now, so no blank glyphs
     ask();
   }
   function foundIt(b) {
@@ -374,7 +376,7 @@
   // buildSprites() clears and rebuilds all of it: call it again whenever the fonts change.
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
   const TEXT_FONT = '"Arial Rounded MT Bold","Trebuchet MS",sans-serif';
-  const HUES = 12, STEP = 8; // iridescent hue buckets, and size buckets in css px
+  const HUES = 12, STEP = 8, ITEM_STEP = 16; // iridescent hue buckets, and size buckets in css px
   const bodySprites = new Map(), itemSprites = new Map();
   let cloudSprites = [];
   function makeSprite(side) {
@@ -383,7 +385,7 @@
     const g = c.getContext('2d'); g.scale(DPR, DPR);
     return { c, g, side };
   }
-  const bucket = r => Math.max(STEP, Math.ceil(r / STEP) * STEP); // round up so a sprite is only ever scaled down
+  const bucket = (r, step = STEP) => Math.max(step, Math.ceil(r / step) * step); // round up so a sprite is only ever scaled down
 
   function paintBody(g, cx, cy, r, tint, hue) {
     const grad = g.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);
@@ -413,7 +415,7 @@
     return sp;
   }
 
-  // the bare glyph, no outline: paintSticker() builds the shared sticker look around it
+  // the bare glyph, no outline: startSticker() builds the shared sticker look around it
   function paintGlyph(g, item, x, y, size) {
     g.textAlign = 'center'; g.textBaseline = 'middle';
     if (item.kind === 'emoji') {
@@ -429,39 +431,73 @@
     }
   }
   // sticker look shared by every game: white outline (6% of size, at least 2px) stamped from the
-  // glyph's silhouette at 16 offsets, over a soft shadow, all baked into the sprite
-  function paintSticker(sp, item, S) {
-    const { g, side } = sp, c = side / 2;
-    const glyph = makeSprite(side);
+  // glyph's silhouette at 16 offsets, over a soft shadow, all baked into the sprite.
+  // Built as a job that does a few stamps per call, so a big sprite never costs one long frame.
+  const STAMPS = 16;
+  function startSticker(item, S) {
+    const side = S * 1.8, c = side / 2, sp = makeSprite(side);
+    // three scratch layers, reused so a build doesn't allocate big canvases
+    const [glyph, sil, ring] = scratch(sp.c.width / DPR);
+    for (const l of [glyph, sil, ring]) { l.g.setTransform(DPR, 0, 0, DPR, 0, 0); l.g.clearRect(0, 0, side, side); }
     paintGlyph(glyph.g, item, c, c, S);
-    const sil = makeSprite(side); // white silhouette of the glyph
+    sil.g.globalCompositeOperation = 'source-over';
     sil.g.drawImage(glyph.c, 0, 0, side, side);
-    sil.g.globalCompositeOperation = 'source-in'; sil.g.fillStyle = '#fff'; sil.g.fillRect(0, 0, side, side);
-    const ring = makeSprite(side), o = Math.max(2, S * 0.06);
-    for (let k = 0; k < 16; k++) {
-      const a = k / 16 * Math.PI * 2;
-      ring.g.drawImage(sil.c, Math.cos(a) * o, Math.sin(a) * o, side, side);
-    }
-    g.save();
-    g.shadowColor = 'rgba(43,45,92,.25)'; g.shadowOffsetY = S * 0.03 * DPR; g.shadowBlur = S * 0.04 * DPR;
-    g.drawImage(ring.c, 0, 0, side, side);
-    g.restore();
-    g.drawImage(glyph.c, 0, 0, side, side);
+    sil.g.globalCompositeOperation = 'source-in'; sil.g.fillStyle = '#fff'; sil.g.fillRect(0, 0, side, side); // white silhouette
+    return { sp, glyph, sil, ring, S, side, k: 0 };
   }
-  function itemSprite(item, S) {
-    const key = item.kind + '|' + (item.glyph || item.shape) + '|' + (item.color || '') + '|' + S;
-    let sp = itemSprites.get(key);
-    if (!sp) {
-      if (itemSprites.size > 400) itemSprites.clear();
-      sp = makeSprite(S * 2.4);
-      paintSticker(sp, item, S);
-      itemSprites.set(key, sp);
+  // returns true when the sprite is finished
+  function stepSticker(j, stamps) {
+    const o = Math.max(2, j.S * 0.06);
+    for (let n = 0; n < stamps && j.k < STAMPS; n++, j.k++) {
+      const a = j.k / STAMPS * Math.PI * 2;
+      j.ring.g.drawImage(j.sil.c, Math.cos(a) * o, Math.sin(a) * o, j.side, j.side);
     }
+    if (j.k < STAMPS) return false;
+    const g = j.sp.g;
+    g.save();
+    g.shadowColor = 'rgba(43,45,92,.25)'; g.shadowOffsetY = j.S * 0.03 * DPR; g.shadowBlur = j.S * 0.04 * DPR;
+    g.drawImage(j.ring.c, 0, 0, j.side, j.side);
+    g.restore();
+    g.drawImage(j.glyph.c, 0, 0, j.side, j.side);
+    return true;
+  }
+  const scratchLayers = new Map(); // by sprite side, so each layer is exactly the size it is read at
+  function scratch(side) {
+    let l = scratchLayers.get(side);
+    if (!l) scratchLayers.set(side, l = [makeSprite(side), makeSprite(side), makeSprite(side)]);
+    return l;
+  }
+  // Building one is the costly part (16 stamps), so it never happens mid-frame: a sprite that is missing
+  // is queued and built after the frame, one per frame, and the glyph shows up a frame or two later.
+  const MAX_ITEM = 144; // a giant's reveal is scaled up a little rather than building a huge sprite
+  const itemKey = (item, S) => item.kind + '|' + (item.glyph || item.shape) + '|' + (item.color || '') + '|' + S;
+  const pending = new Map();
+  let job = null; // the sprite being built, a few stamps per frame
+  function itemSprite(item, S) {
+    const key = itemKey(item, S);
+    const sp = itemSprites.get(key);
+    if (!sp && !pending.has(key)) pending.set(key, [item, S]);
     return sp;
   }
-  function drawItem(item, x, y, size, alpha) {
+  function buildPending(stamps = 4) {
+    if (!job) {
+      for (const [key, [item, S]] of pending) { pending.delete(key); job = { key, j: startSticker(item, S) }; break; }
+      if (!job) return;
+    }
+    if (stepSticker(job.j, stamps)) {
+      if (itemSprites.size > 400) itemSprites.clear();
+      itemSprites.set(job.key, job.j.sp); job = null;
+    }
+  }
+  const flushPending = () => { while (pending.size || job) buildPending(STAMPS); }; // before play starts, or when something is needed now
+  // a sprite is built for the biggest size it is drawn at (outline and shadow are a share of that size),
+  // so growing and wobbling only ever scale it down: bubble glyphs are up to 0.8 of the radius, reveals 1.4
+  const itemBucket = (ref, mult) => Math.min(MAX_ITEM, bucket(ref * mult, ITEM_STEP));
+  function drawItem(item, x, y, size, alpha, ref, mult) {
     if (item.kind === 'color') return;
-    const S = bucket(size), sp = itemSprite(item, S), k = size / S, w = sp.side * k;
+    const S = itemBucket(ref, mult), sp = itemSprite(item, S);
+    if (!sp) return;
+    const k = size / S, w = sp.side * k;
     ctx.globalAlpha = alpha;
     ctx.drawImage(sp.c, x - w / 2, y - w / 2, w, w);
     ctx.globalAlpha = 1;
@@ -485,7 +521,7 @@
   }
 
   function buildSprites() {
-    bodySprites.clear(); itemSprites.clear();
+    bodySprites.clear(); itemSprites.clear(); pending.clear(); job = null; scratchLayers.clear();
     cloudSprites = CLOUDS.map(c => paintCloud(unit() * 0.13 * c.s));
     // warm the common bubble looks so the first pops don't hitch
     const r0 = baseR();
@@ -516,7 +552,7 @@
     }
     const R = bucket(b.r * 1.04 + 2), sp = bodySprite(b, R), k = r / R, w = sp.side * k;
     ctx.drawImage(sp.c, b.x - w / 2, b.y - w / 2, w, w);
-    if (b.item.kind !== 'color') drawItem(b.item, b.x, b.y, r * 0.75, 0.95);
+    if (b.item.kind !== 'color') drawItem(b.item, b.x, b.y, r * 0.75, 0.95, b.r, 0.8);
     ctx.beginPath(); ctx.ellipse(b.x - r * 0.4, b.y - r * 0.45, r * 0.22, r * 0.11, -0.7, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
   }
@@ -581,7 +617,7 @@
         ctx.beginPath(); ctx.arc(0, 0, size * 0.6, 0, Math.PI * 2); ctx.fillStyle = r.item.color; ctx.fill();
         ctx.lineWidth = 5; ctx.strokeStyle = '#fff'; ctx.stroke();
       } else {
-        drawItem(r.item, 0, 0, size, alpha);
+        drawItem(r.item, 0, 0, size, alpha, r.r, 1.4);
       }
       // numbers: show that many dots so counting is concrete
       if (r.item.count) {
@@ -615,13 +651,13 @@
     if (target.kind === 'color') {
       ctx.beginPath(); ctx.arc(s * 0.35, 0, s * 0.42, 0, Math.PI * 2); ctx.fillStyle = target.color; ctx.fill();
       ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(43,45,92,.3)'; ctx.stroke();
-    } else drawItem(target, s * 0.35, 0, s * 0.62, 1);
+    } else drawItem(target, s * 0.35, 0, s * 0.62, 1, s * 0.62, 1);
     ctx.restore();
   }
 
   function loop(t) {
     const dt = Math.min(0.05, (t - last) / 1000); last = t;
-    update(dt); draw(); requestAnimationFrame(loop);
+    update(dt); draw(); buildPending(); requestAnimationFrame(loop);
   }
 
   // ---------- Grown-up panel (press & hold 1.5s) ----------
@@ -660,6 +696,7 @@
   // start with the sky already full
   for (let i = 0, n = maxBubbles(); i < n; i++) spawnBubble(undefined, H * (0.1 + 0.9 * (i + Math.random()) / n), { giant: false });
   newTarget();
+  flushPending(); // first frame starts with every glyph ready
   requestAnimationFrame(loop);
   // ?debug: a read-only snapshot for automated testing
   if (/[?&]debug/.test(location.search)) window.__bubblePop = () => ({ target: target && target.id, found, bubbles: bubbles.length,
