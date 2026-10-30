@@ -52,9 +52,11 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 
   Bump the key's version only if old saved values would break the game. New settings just get a default in the `settings` object.
 - **Color emoji on canvas:** set `ctx.fillStyle = '#000'` right before any emoji `fillText`. Chrome applies the fill's transparency to color emoji, and this once made icons look washed out.
+- **Sticker emoji:** emoji are pre-rendered once as stickers: a white outline about 6% of the size (the glyph silhouette stamped in white at 16 offsets) and a soft shadow `rgba(43,45,92,.25)`, baked into a sprite. Keep **one master sprite per glyph** at the largest size it's drawn, and scale it down; never cache per size, because per-size caches reached 120MB and iPad Safari kills pages over its canvas memory limit.
+- **Sound limiter:** every game puts a `DynamicsCompressorNode` (threshold -12 dB, knee 6, ratio 12, attack 0.003, release 0.25) between its master gain and `actx.destination`, so piles of sounds don't distort on tablet speakers.
 - **Offline (`sw.js`):** stale-while-revalidate over a fixed `FILES` list.
   - **Prefix cleanup:** all games share one origin, so `activate` may delete only caches starting with that game's prefix (`k.startsWith('<game>-')`). Never delete other games' caches.
-  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v4`, `magic-paint-v6`, `little-band-v5`, `web-hero-v3`. Bumping gets installed copies to update.
+  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v5`, `magic-paint-v7`, `little-band-v6`, `web-hero-v4`. Bumping gets installed copies to update.
   - **New files:** add any file the game needs to `FILES`.
 - **Look:** soft pastel gradients and white-outlined shapes. Fonts are "Trebuchet MS" for UI and "Arial Rounded MT Bold" for big glyphs; ink is `#2b2d5c`; the bright palette is `#ff3b3b #ff9a1f #f5c800 #22b84a #2f7bff #a04dff #ff4fb0`.
 
@@ -71,7 +73,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Serve locally:** `python3 -m http.server 8777 --bind 127.0.0.1` from the repo root (run it in the background), then open `http://localhost:8777/`.
 - **Check every size** in the built-in browser with `resize_window`: phone portrait 375x812, phone landscape 844x390, iPad 768x1024, monitor 1440x900. Reset to `desktop` when done.
 - **Simulate play** with dispatched `PointerEvent`s (`pointerdown`/`pointermove`/`pointerup` with `pointerId`, `clientX`, `clientY`). Open the grown-up panel by dispatching `pointerdown` on `#parentBtn` and waiting about 1.7s.
-- **Debug hooks:** open a game with `?debug` to get a read-only snapshot. Bubble Pop has `window.__bubblePop()` (Find it target and where those bubbles are). Web Hero has `window.__webHero()` (level, stars, vehicle positions and whether each is knocked) and draws body outlines.
+- **Debug hooks:** open a game with `?debug` to get a read-only snapshot. Bubble Pop has `window.__bubblePop()` (Find it target and where those bubbles are). Web Hero has `window.__webHero()` (level, stars, vehicle positions and whether each is knocked) and draws body outlines. Magic Paint has `window.__magicPaint()` (memory per cache).
 - **The game loop pauses while a test script awaits.** rAF stops while a `javascript_exec` is waiting, so let time pass with the computer tool's `wait` and query afterwards. Real clicks (`left_click`) run in real time.
 - **Ignore one console error:** "An unknown error occurred when fetching the script" is a preview-browser service-worker limit, not a bug. Check service worker behaviour on the live HTTPS site instead.
 - **Find what's left untested:** real audio and real fingers can't be checked from a session, so say so in reports.
@@ -94,17 +96,22 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Giant bubbles:** every 11th spawn is a giant that bursts into 4 minis.
 - **Celebration:** every 12 pops (in free popping).
 - **Find it** (`settings.find`): items carry an `id` and an `ask` phrase. `newTarget()` picks one and puts it on at least 2 mid-screen bubbles. `newItem()` makes about 30% of new bubbles the target. The badge at top center shows the target, so it works with the voice off. After 3 misses or 12s, it asks again and the right bubbles shimmer (`hintGlow`). iOS needs a touch before speech, so the first ask is repeated on the first tap.
-- **Clouds:** drawn each frame behind the bubbles (`drawClouds`).
+- **Clouds:** drawn each frame behind the bubbles (`drawClouds`) from opaque cloud sprites with globalAlpha, so overlapping clouds have no seams.
+- **Sprites:** bubble bodies (one master per hue or tint, the rim stroked live), glyph stickers and clouds are all cached, so a frame is mostly `drawImage`. `buildSprites()` queues every sprite the current mode can need on startup, resize (`buildSprites(true)` keeps masters if size and DPR didn't change) and mode change, and builds them in small slices after frames; anything not ready yet draws the old uncached way. Blit at whole device pixels. Mix mode's cache is about 18MB.
 
 **Magic Paint** (`magic-paint/`)
 - **Painting:** a persistent `paint` layer canvas with live effects drawn on top. Drag paints and a short tap (under 300ms, under 12px of movement) stamps. Stamps animate, then bake into the paint layer.
 - **Colors:** the rainbow brush advances with distance painted, so it looks the same on fast and slow screens.
+- **Brush:** strokes are continuous (no bead seams between segments). `settings.brushStyle` is `smooth` (default) or `crayon`, a grainy wax texture, in the grown-up panel.
+- **Idle:** when nothing is moving the loop doesn't redraw; the ghost hint still appears on time.
 - **Color buttons:** DOM buttons, not canvas. A column on the left in portrait, a row across the top in landscape. `settings.brush` is `rainbow`, `crayons` (surprise colors) or a hex color.
 - **Hint:** a ghost 👆 hint shows on a blank page.
 - **Saving:** the share sheet when `navigator.canShare({files})`, otherwise a download. The saved picture includes the coloring-page lines.
 - **Coloring pages** (`settings.page`, `PAGES`): line art drawn in a -1..1 box with helpers `c e p l a` onto an `outline` canvas that sits on top of the paint. `wall` marks line pixels.
-- **Tap to fill:** a tap on a page flood-fills the open area (`fillAt`) into an offscreen canvas, which pours in with a growing clip circle, then bakes into the paint. A tap on a page never stamps: a tap on a line fills the nearest open spot (searched out past the line width, `lineW`), and if there is none it just sparkles.
+- **Tap to fill:** when a page is drawn, `labelRegions()` labels every open area once with bounding boxes, so a tap just looks up its region (a few ms, even full-screen on a 12.9" iPad). The fill goes into an offscreen canvas, which pours in with a growing clip circle, then bakes into the paint. A tap on a page never stamps: a tap on a line fills the nearest open spot (searched out past the line width, `lineW`), and if there is none it just sparkles.
 - **Page placement:** `pageBox()` keeps clear of the color buttons. On resize the page keeps its box so the paint still lines up, unless it no longer fits (then the page is re-placed and the paint cleared).
+- **Page memory:** each page (and blank paper) keeps its own painting. `leavePage()` snapshots the paint to an in-memory PNG blob, and `restorePage()` brings it back if the page box still matches. Not saved across reloads. Clear clears only the current page.
+- **Stickers:** stamps use the shared sticker look from a small least-recently-used cache (about 14MB). `?debug` exposes memory per cache through `window.__magicPaint()`.
 - **Picture button:** the 🖼️ button in `#palette` cycles `PAGE_ORDER`. On big screens (`bigStrip()`: shortest side at least 700px, with the color buttons shown) it hides, and `#pages` shows every page as a tile down the right side instead. Thumbnails are drawn once with `drawLines()`, `pageBox()` keeps clear of the strip, and tapping the current page's tile does nothing so it can't wipe the painting.
 
 **Little Band** (`little-band/`)
@@ -114,6 +121,8 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Key colors:** white keys use classroom bell colors (C red to B pink).
 - **Songs:** `SONGS` holds MIDI lists within C4–C5. The next key glows with a ⭐ inside it, and wrong keys just play.
 - **Beat:** the play-along beat is scheduled ahead on the audio clock (`scheduleBeat`).
+- **Static layer:** the background, resting keys and instrument buttons (with their shadows and sticker emoji) are drawn once per layout by `rebuild()`; each frame draws only what moves, and nothing at all when idle. No `shadowBlur` per frame (it's slow on iPad Safari).
+- **Voices:** at most `MAX_VOICES` (10) key notes at once; an extra one fades out the oldest.
 - **Record and play:** ● and ▶ are `ctrl` buttons in the instrument row (8 buttons: one row when wide, 2×4 when tall). A take is a list of `{ t, kind, midi, voice, dur, id }`. Keys record on press, and their `dur` is set on release. Playback replays on `setTimeout`s and lights keys through the `ghost` map without moving song steps. There's a 20s cap (`MAX_REC`).
 
 **Web Hero** (`web-hero/`)
@@ -121,7 +130,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Hero:** original masked kid in a teal suit with a yellow chest star, orange domino mask and yellow cape.
 - **Shooting:** pull anywhere to slingshot (a stretchy strand plus 25 aim dots), or tap empty sky to auto-throw a lobbed arc there.
 - **Sticky web** (`settings.tap = 'yank'`, the default): tapping a crate or vehicle (`Query.point`) adds a Matter `Constraint` from the wrist to that spot. The web shoots out for 0.12s, reels in hard, and lets go at 0.75s. At most 2 at once.
-- **Targets:** vehicles are emoji on Matter bodies, on crate and girder towers.
+- **Targets:** hand-drawn vehicles on Matter bodies, on crate and girder towers.
 - **Physics:** Matter.js `Engine.create({ enableSleeping: true })`, stepped at a fixed 1/60s. No Matter.Runner or Matter.Render: everything is drawn by hand.
 - **Knocked rule:** a vehicle counts as knocked when it is rotated more than 60°, falls more than its height, leaves the screen, or is pushed more than 0.9 of its width from its start.
 - **Levels:** 3 hand-made tutorials, then a seeded generator (same level number and difficulty always gives the same level). Each level settles in a silent 1s physics run and is regenerated if anything falls on its own.
@@ -129,4 +138,4 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Juice:** a web trail behind each shot, dust puffs at hard contacts, a small screen shake on big crashes (the HUD doesn't shake), and a row of the level's vehicles under the star counter, ticked off as they fall.
 - **Sizing:** `u = max(min(W, H*1.5)/14, min(W/10, H/16))`. The second term stops tall screens from getting a tiny world under a huge sky.
 - **Tuning calls:** ball radius about `0.4*unit`, pull cap about `3.5*unit`, ball density 0.016, hero drawn at 1.15x. Big levels use the right 67% of the width.
-- **Vehicle facing:** vehicles aren't flipped, so which way they face depends on the emoji font. Only Apple's font has been seen.
+- **Vehicles:** drawn by hand (`paintVehicle` to a sprite per type and size, `drawVehicle` adds live spinning wheels), in the city's flat style, always facing the hero. No faces on vehicles (that's a trademarked movie look). Hubcaps pop off when knocked. Bodies and physics are unchanged from the emoji version.
