@@ -161,7 +161,7 @@
     dpr = Math.min(devicePixelRatio || 1, 2);
     W = innerWidth; H = innerHeight;
     for (const sp of stickers.values()) sp.c.width = 0; // size buckets change with the screen
-    stickers.clear();
+    stickers.clear(); stickerBytes = 0;
     // keep the picture when the screen rotates or resizes
     const keep = document.createElement('canvas');
     keep.width = paint.width; keep.height = paint.height;
@@ -329,8 +329,7 @@
   function addStamp(x, y) {
     dirty = true;
     stampSound();
-    // a few set sizes, so the sticker cache gets hits
-    stamps.push({ x, y, glyph: pick(STAMPS[settings.stamps] || STAMPS.mix), t: 0, size: unit() * (0.11 + ((Math.random() * 4) | 0) * 0.05 / 3), rot: (Math.random() - 0.5) * 0.5 });
+    stamps.push({ x, y, glyph: pick(STAMPS[settings.stamps] || STAMPS.mix), t: 0, size: unit() * (0.11 + Math.random() * (STAMP_MAX - 0.11)), rot: (Math.random() - 0.5) * 0.5 });
     burst(x, y, 12, unit() * 0.3);
   }
 
@@ -343,34 +342,39 @@
 
   // ---------- Sticker emoji ----------
   // Same look as the other games: the emoji with a white outline (its silhouette stamped in white at 16 points around a circle)
-  // and a soft shadow, drawn once to a small canvas and reused. Cached by glyph and size, rounded up to a multiple of 8px.
-  const stickers = new Map(), STICKER_MAX = 24; // a Map keeps insertion order, so the oldest-used one is first
-  function sticker(glyph, size) {
-    // drawn big enough for the pop-in (1.3x) so it is only ever scaled down
-    const em = Math.ceil(size * 1.3 * dpr / 8) * 8, key = glyph + '|' + em;
-    let sp = stickers.get(key);
-    if (sp) { stickers.delete(key); stickers.set(key, sp); return sp; }
-    const o = Math.max(2, em * 0.06), pad = Math.ceil(o + em * 0.08), side = Math.ceil(em * 1.25) + pad * 2, mid = side / 2;
+  // and a soft shadow. One master sprite per glyph, made at the biggest size a stamp is ever drawn (including the 1.3x pop-in)
+  // and only ever scaled down, so there is nothing to cache per size. Page-sized canvases are what crash iPad Safari, so the
+  // sprites share a memory budget and the least recently used one goes first (it is simply drawn again if it comes back).
+  const STAMP_MAX = 0.16, POP = 1.3, STICKER_BUDGET = 14 * 1024 * 1024; // STAMP_MAX: biggest stamp size, as a share of unit()
+  const stickers = new Map(); // glyph -> { c, em, side, bytes }; a Map keeps insertion order, so the oldest-used one is first
+  let stickerBytes = 0;
+  function sticker(glyph) {
+    let sp = stickers.get(glyph);
+    if (sp) { stickers.delete(glyph); stickers.set(glyph, sp); return sp; }
+    const em = Math.ceil(unit() * STAMP_MAX * POP * dpr / 8) * 8;
+    const o = Math.max(2, em * 0.06), pad = Math.ceil(o + em * 0.08), side = Math.ceil(em * 1.2) + pad * 2, mid = side / 2;
     const mk = () => { const c = document.createElement('canvas'); c.width = c.height = side; return c; };
     const glyphAt = g => { g.font = `${em}px ${EMOJI}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#000'; g.fillText(glyph, mid, mid); }; // black first: keeps emoji fully opaque
     const sil = mk(), sg = sil.getContext('2d');
     glyphAt(sg); sg.globalCompositeOperation = 'source-in'; sg.fillStyle = '#fff'; sg.fillRect(0, 0, side, side);
     const ring = mk(), rg = ring.getContext('2d');
-    for (let i = 0; i < 16; i++) { const a = i / 16 * TAU; rg.drawImage(sil, Math.cos(a) * o, Math.sin(a) * o); }
-    rg.drawImage(sil, 0, 0);
+    // the silhouette only fills the middle of the sprite, so only that part is copied
+    const gb = side - pad * 2;
+    for (let i = 0; i < 16; i++) { const a = i / 16 * TAU; rg.drawImage(sil, pad, pad, gb, gb, pad + Math.cos(a) * o, pad + Math.sin(a) * o, gb, gb); }
+    rg.drawImage(sil, pad, pad, gb, gb, pad, pad, gb, gb);
     const c = mk(), g = c.getContext('2d');
     g.shadowColor = 'rgba(43,45,92,.25)'; g.shadowOffsetY = em * 0.03; g.shadowBlur = em * 0.04;
     g.drawImage(ring, 0, 0);
     g.shadowColor = 'transparent'; g.shadowBlur = g.shadowOffsetY = 0;
     glyphAt(g);
     sil.width = ring.width = 0; // the two helpers are not needed again
-    sp = { c, em, side };
-    stickers.set(key, sp);
-    if (stickers.size > STICKER_MAX) { const old = stickers.keys().next().value; stickers.get(old).c.width = 0; stickers.delete(old); }
+    sp = { c, em, side, bytes: side * side * 4 };
+    stickers.set(glyph, sp); stickerBytes += sp.bytes;
+    while (stickerBytes > STICKER_BUDGET && stickers.size > 1) { const old = stickers.keys().next().value, o2 = stickers.get(old); o2.c.width = 0; stickerBytes -= o2.bytes; stickers.delete(old); }
     return sp;
   }
   function drawStamp(g, s, scale) {
-    const sp = sticker(s.glyph, s.size), w = sp.side * s.size * scale / sp.em; // the sprite's size on screen, in css px
+    const sp = sticker(s.glyph), w = sp.side * s.size * scale / sp.em; // the sprite's size on screen, in css px
     g.save(); g.translate(s.x, s.y); g.rotate(s.rot);
     g.imageSmoothingQuality = 'high';
     g.drawImage(sp.c, -w / 2, -w / 2 + s.size * 0.06, w, w);
@@ -451,7 +455,7 @@
   let warmTimer = 0;
   function drawOutline() {
     wake(); // a new outline (page, resize, paper) has to be drawn
-    outline.width = cv.width; outline.height = cv.height; wall = null; fillPool.length = 0;
+    outline.width = cv.width; outline.height = cv.height; wall = null; for (const c of fillPool) c.width = 0; fillPool.length = 0;
     if (!page || !PAGES[page.name]) { labels = boxes = runs = runAt = null; return; }
     const g = octx, S = page.S;
     g.setTransform(dpr * S, 0, 0, dpr * S, dpr * page.cx, dpr * page.cy);
@@ -576,7 +580,7 @@
   // flood-fill the open area under the finger, then pour it in from that spot
   const rgbOf = (() => { const c = document.createElement('canvas').getContext('2d', { willReadFrequently: true }); c.canvas.width = c.canvas.height = 1;
     return css => { c.clearRect(0, 0, 1, 1); c.fillStyle = css; c.fillRect(0, 0, 1, 1); return c.getImageData(0, 0, 1, 1).data; }; })();
-  // fill canvases are page-sized and a fresh one per tap makes a big allocation, so a couple are reused (cleared by box when done)
+  // fill canvases are page-sized and a fresh one per tap makes a big allocation, so one is kept and reused (cleared by box when done)
   const fillPool = [];
   function takeFillCanvas(w, h) {
     const c = fillPool.pop();
@@ -585,7 +589,7 @@
   }
   function giveFillCanvas(f) {
     f.fc.getContext('2d').clearRect(f.x0, f.y0, f.fw, f.fh);
-    if (fillPool.length < 2) fillPool.push(f.fc);
+    if (fillPool.length < 1) fillPool.push(f.fc); else f.fc.width = 0; // one idle page-sized canvas is plenty; free the rest
   }
   const regionBox = id => [boxes[id * 4], boxes[id * 4 + 1], boxes[id * 4 + 2], boxes[id * 4 + 3]];
   // the old way, for pages with more than 65535 open areas: flood from the tap, leaving the result in floodMask
@@ -872,6 +876,16 @@
   };
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
 
+  // ?debug: a read-only look at what is held in memory
+  if (/[?&]debug/.test(location.search)) window.__magicPaint = async () => {
+    const sizes = []; for (const e of saved.values()) for (const b of await Promise.all(e.blobs)) if (b) sizes.push(b.size);
+    const px = cv.width * cv.height * 4;
+    return { canvasMB: +(3 * px / 1048576).toFixed(1), // main, paint and outline layers
+      stickerCount: stickers.size, stickerMB: +(stickerBytes / 1048576).toFixed(1),
+      fillPoolCanvases: fillPool.length, fillPoolMB: +(fillPool.length * px / 1048576).toFixed(1), fillsInFlight: fills.length,
+      regionMapMB: +(((labels ? labels.byteLength : 0) + (wall ? wall.byteLength : 0) + (runs ? runs.byteLength : 0) + (boxes ? boxes.byteLength : 0) + (runAt ? runAt.byteLength : 0)) / 1048576).toFixed(1),
+      savedPages: saved.size, savedKB: +(sizes.reduce((a, b) => a + b, 0) / 1024).toFixed(1) };
+  };
   resize();
   if (settings.page && PAGES[settings.page]) { page = { name: settings.page, ...pageBox() }; drawOutline(); }
   syncPages();
