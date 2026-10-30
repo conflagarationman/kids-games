@@ -139,9 +139,17 @@
   const unit = () => Math.min(W, H);
 
   // ---------- Audio ----------
-  let actx = null;
+  let actx = null, out = null;
   function audio() {
-    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (!actx) {
+      try {
+        actx = new (window.AudioContext || window.webkitAudioContext)();
+        // a limiter on the way out, so a pile-up of pops (kids mash the screen) never clips
+        out = actx.createDynamicsCompressor();
+        out.threshold.value = -12; out.knee.value = 6; out.ratio.value = 12; out.attack.value = 0.003; out.release.value = 0.25;
+        out.connect(actx.destination);
+      } catch (e) {}
+    }
     if (actx && actx.state === 'suspended') actx.resume();
     return actx;
   }
@@ -154,7 +162,7 @@
     g.gain.setValueAtTime(0.0001, start);
     g.gain.exponentialRampToValueAtTime(vol, start + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-    o.connect(g).connect(a.destination); o.start(start); o.stop(start + dur + 0.02);
+    o.connect(g).connect(out); o.start(start); o.stop(start + dur + 0.02);
   }
   function popSound() {
     if (!settings.sound || !audio()) return;
@@ -163,7 +171,7 @@
     const o = actx.createOscillator(), g = actx.createGain();
     o.frequency.setValueAtTime(700, t); o.frequency.exponentialRampToValueAtTime(180, t + 0.08);
     g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
-    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.12);
+    o.connect(g).connect(out); o.start(t); o.stop(t + 0.12);
     // the happy note
     tone(pick(NOTES), t + 0.03, 0.45, 'triangle', 0.14);
   }
