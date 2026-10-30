@@ -240,7 +240,6 @@
       hue: (Math.random() * 360) | 0,
       born: performance.now(),
     });
-    const nb = bubbles[bubbles.length - 1]; itemSprite(nb.item, itemBucket(nb.r, 0.8)); itemSprite(nb.item, itemBucket(nb.r, 1.4));
   }
 
   function addConfetti(x, y, spreadX, minVy) {
@@ -262,8 +261,7 @@
     target = t; wrongRun = 0; hintGlow = 0;
     // make sure a couple are already on screen, in easy reach
     const mid = bubbles.filter(b => b.y > H * 0.3 && b.y < H * 0.85 && !b.giant).sort(() => Math.random() - 0.5);
-    for (const b of mid.slice(0, 2)) { b.item = copyOf(target); itemSprite(b.item, itemBucket(b.r, 0.8)); itemSprite(b.item, itemBucket(b.r, 1.4)); }
-    flushPending(); // the target's bubbles are on screen right now, so no blank glyphs
+    for (const b of mid.slice(0, 2)) b.item = copyOf(target);
     ask();
   }
   function foundIt(b) {
@@ -376,12 +374,12 @@
   // buildSprites() clears and rebuilds all of it: call it again whenever the fonts change.
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
   const TEXT_FONT = '"Arial Rounded MT Bold","Trebuchet MS",sans-serif';
-  const HUES = 12, STEP = 8, ITEM_STEP = 16; // iridescent hue buckets, and size buckets in css px
+  const HUES = 8, STEP = 24, ITEM_STEP = 16; // coarse buckets keep the warmed cache small; sprites are only ever scaled down // iridescent hue buckets, and size buckets in css px
   const bodySprites = new Map(), itemSprites = new Map();
   let cloudSprites = [];
   function makeSprite(side) {
     const c = document.createElement('canvas');
-    c.width = c.height = Math.ceil(side * DPR);
+    c.width = c.height = Math.round(side * DPR);
     const g = c.getContext('2d'); g.scale(DPR, DPR);
     return { c, g, side };
   }
@@ -401,17 +399,12 @@
     g.lineWidth = 3; g.strokeStyle = 'rgba(255,255,255,0.8)'; g.stroke();
   }
   // the bubble body (gradient + rim) at radius R, keyed by tint or hue bucket
+  const hueOf = b => Math.round(b.hue / (360 / HUES)) % HUES;
+  const bodyKey = (tint, h, R) => (tint || h) + '|' + R;
   function bodySprite(b, R) {
-    const tint = b.item.kind === 'color' ? b.item.color : null;
-    const h = Math.round(b.hue / (360 / HUES)) % HUES;
-    const key = (tint || h) + '|' + R;
-    let sp = bodySprites.get(key);
-    if (!sp) {
-      if (bodySprites.size > 300) bodySprites.clear();
-      sp = makeSprite(R * 2 + 6);
-      paintBody(sp.g, sp.side / 2, sp.side / 2, R, tint, h * (360 / HUES));
-      bodySprites.set(key, sp);
-    }
+    const tint = b.item.kind === 'color' ? b.item.color : null, h = hueOf(b);
+    const key = bodyKey(tint, h, R), sp = bodySprites.get(key);
+    if (!sp) want({ key, type: 'body', R, tint, h }, true);
     return sp;
   }
 
@@ -435,22 +428,22 @@
   // Built as a job that does a few stamps per call, so a big sprite never costs one long frame.
   const STAMPS = 16;
   function startSticker(item, S) {
-    const side = S * 1.8, c = side / 2, sp = makeSprite(side);
+    const side = Math.ceil(S * 1.6 * DPR) / DPR, c = side / 2, sp = makeSprite(side); // whole device pixels, so every stamp is a 1:1 blit
     // three scratch layers, reused so a build doesn't allocate big canvases
-    const [glyph, sil, ring] = scratch(sp.c.width / DPR);
+    const [glyph, sil, ring] = scratch(side);
     for (const l of [glyph, sil, ring]) { l.g.setTransform(DPR, 0, 0, DPR, 0, 0); l.g.clearRect(0, 0, side, side); }
     paintGlyph(glyph.g, item, c, c, S);
     sil.g.globalCompositeOperation = 'source-over';
     sil.g.drawImage(glyph.c, 0, 0, side, side);
     sil.g.globalCompositeOperation = 'source-in'; sil.g.fillStyle = '#fff'; sil.g.fillRect(0, 0, side, side); // white silhouette
-    return { sp, glyph, sil, ring, S, side, k: 0 };
+    return { sp, glyph, sil, ring, item, S, side, k: 0 };
   }
   // returns true when the sprite is finished
   function stepSticker(j, stamps) {
     const o = Math.max(2, j.S * 0.06);
     for (let n = 0; n < stamps && j.k < STAMPS; n++, j.k++) {
-      const a = j.k / STAMPS * Math.PI * 2;
-      j.ring.g.drawImage(j.sil.c, Math.cos(a) * o, Math.sin(a) * o, j.side, j.side);
+      const a = j.k / STAMPS * Math.PI * 2; // whole device pixels: a fractional offset makes each blit 10x slower
+      j.ring.g.drawImage(j.sil.c, Math.round(Math.cos(a) * o * DPR) / DPR, Math.round(Math.sin(a) * o * DPR) / DPR, j.side, j.side);
     }
     if (j.k < STAMPS) return false;
     const g = j.sp.g;
@@ -458,7 +451,7 @@
     g.shadowColor = 'rgba(43,45,92,.25)'; g.shadowOffsetY = j.S * 0.03 * DPR; g.shadowBlur = j.S * 0.04 * DPR;
     g.drawImage(j.ring.c, 0, 0, j.side, j.side);
     g.restore();
-    g.drawImage(j.glyph.c, 0, 0, j.side, j.side);
+    if (j.item.kind === 'emoji') g.drawImage(j.glyph.c, 0, 0, j.side, j.side); // letters and shapes get their color live, so one sprite serves every color
     return true;
   }
   const scratchLayers = new Map(); // by sprite side, so each layer is exactly the size it is read at
@@ -467,39 +460,111 @@
     if (!l) scratchLayers.set(side, l = [makeSprite(side), makeSprite(side), makeSprite(side)]);
     return l;
   }
-  // Building one is the costly part (16 stamps), so it never happens mid-frame: a sprite that is missing
-  // is queued and built after the frame, one per frame, and the glyph shows up a frame or two later.
-  const MAX_ITEM = 144; // a giant's reveal is scaled up a little rather than building a huge sprite
-  const itemKey = (item, S) => item.kind + '|' + (item.glyph || item.shape) + '|' + (item.color || '') + '|' + S;
-  const pending = new Map();
-  let job = null; // the sprite being built, a few stamps per frame
+  // ---- keeping the caches warm ----
+  // Nothing is ever built inside a frame that draws. buildSprites() queues every sprite the current mode
+  // can need; the loop builds them a little per frame, urgent requests (a bubble that just spawned, a new
+  // target) first. Until a sprite is ready it is drawn the old way, uncached.
+  const MAX_ITEM = 112; // a giant's reveal is scaled up a little rather than building a huge sprite
+  // letters, numbers and shapes are colorless outlines with the fill drawn live on top: one sprite per glyph
+  // instead of one per glyph and color, which keeps the cache around 50-120MB instead of several hundred
+  const itemKey = (item, S) => item.kind + '|' + (item.glyph || item.shape) + '|' + S;
+  const urgent = new Map(), warm = [], queued = new Set();
+  let job = null; // the item sprite being built, a few stamps per frame
+  let SB = 0, SR = 0, SK = 0; // item sprite sizes: in a bubble, in the pop reveal, in the Find it badge
+  function want(task, now) {
+    if (queued.has(task.key)) return;
+    queued.add(task.key);
+    if (now) urgent.set(task.key, task); else warm.push(task);
+  }
   function itemSprite(item, S) {
-    const key = itemKey(item, S);
-    const sp = itemSprites.get(key);
-    if (!sp && !pending.has(key)) pending.set(key, [item, S]);
+    const key = itemKey(item, S), sp = itemSprites.get(key);
+    if (!sp) want({ key, type: 'item', item, S }, true);
     return sp;
   }
-  function buildPending(stamps = 4) {
+  function build(task) {
+    if (task.type === 'body') {
+      if (bodySprites.size > 300) bodySprites.clear();
+      const sp = makeSprite(task.R * 2 + 6);
+      paintBody(sp.g, sp.side / 2, sp.side / 2, task.R, task.tint, task.h * (360 / HUES));
+      bodySprites.set(task.key, sp); queued.delete(task.key);
+    } else job = { task, j: startSticker(task.item, task.S) };
+  }
+  // one step of work: finish a few stamps of the current sprite, or start the next one
+  function buildStep(stamps = 3) {
     if (!job) {
-      for (const [key, [item, S]] of pending) { pending.delete(key); job = { key, j: startSticker(item, S) }; break; }
-      if (!job) return;
+      let t;
+      for (const [k, v] of urgent) { t = v; urgent.delete(k); break; }
+      while (!t && warm.length) { t = warm.shift(); if (itemSprites.has(t.key) || bodySprites.has(t.key)) { queued.delete(t.key); t = null; } }
+      if (!t) return;
+      build(t); if (!job) return;
     }
     if (stepSticker(job.j, stamps)) {
       if (itemSprites.size > 400) itemSprites.clear();
-      itemSprites.set(job.key, job.j.sp); job = null;
+      itemSprites.set(job.task.key, job.j.sp); queued.delete(job.task.key); job = null;
     }
   }
-  const flushPending = () => { while (pending.size || job) buildPending(STAMPS); }; // before play starts, or when something is needed now
-  // a sprite is built for the biggest size it is drawn at (outline and shadow are a share of that size),
-  // so growing and wobbling only ever scale it down: bubble glyphs are up to 0.8 of the radius, reveals 1.4
-  const itemBucket = (ref, mult) => Math.min(MAX_ITEM, bucket(ref * mult, ITEM_STEP));
-  function drawItem(item, x, y, size, alpha, ref, mult) {
+  // Builds happen after a frame is drawn, in a small time slice (smaller when frames are already slow),
+  // never inside the drawing itself
+  const hasWork = () => job || urgent.size || warm.length;
+  function buildSlice(ms) {
+    const t0 = performance.now();
+    do buildStep(4); while (hasWork() && performance.now() - t0 < ms);
+  }
+  const itemBucket = (r, mult) => Math.min(MAX_ITEM, bucket(r * mult, ITEM_STEP));
+  const warmItems = () => {
+    const m = settings.mode, all = m === 'mix', out = [];
+    if (all || m === 'animals') for (const a of ANIMALS) out.push({ kind: 'emoji', glyph: a[0] });
+    if (all || m === 'letters') for (const l of LETTERS) out.push({ kind: 'text', glyph: l });
+    if (all || m === 'numbers') for (let n = 1; n <= 10; n++) out.push({ kind: 'text', glyph: String(n) });
+    if (all || m === 'shapes') for (const sh of SHAPES) out.push({ kind: 'shape', shape: sh });
+    return out;
+  };
+  function warmUp(resized) {
+    itemSprites.clear(); job = null; urgent.clear(); warm.length = 0; queued.clear(); scratchLayers.clear();
+    const r0 = baseR();
+    SB = itemBucket(r0, 1); SR = itemBucket(r0, 1.75); SK = 48;
+    {
+      if (resized) bodySprites.clear(); // sizes changed; on a mode change the hue bodies are still good
+      const tints = settings.mode === 'colors' || settings.mode === 'mix' ? COLORS.map(c => c[1]) : [];
+      for (let R = bucket(r0 * 0.7 * 1.04 + 2); R <= bucket(r0 * 1.75 * 1.04 + 2); R += STEP) {
+        for (let h = 0; h < HUES; h++) want({ key: bodyKey(null, h, R), type: 'body', R, tint: null, h });
+        for (const t of tints) want({ key: bodyKey(t, 0, R), type: 'body', R, tint: t, h: 0 });
+      }
+    }
+    const items = warmItems();
+    for (const it of items) want({ key: itemKey(it, SB), type: 'item', item: it, S: SB });
+    for (const it of items) want({ key: itemKey(it, SR), type: 'item', item: it, S: SR });
+    for (const it of items) want({ key: itemKey(it, SK), type: 'item', item: it, S: SK }); // the Find it badge
+  }
+  // for ?debug: how much is cached, and how much is still waiting to be built
+  function cacheStats() {
+    let bytes = 0;
+    for (const m of [itemSprites, bodySprites]) for (const sp of m.values()) bytes += sp.c.width * sp.c.height * 4;
+    for (const c of cloudSprites) bytes += c.c.width * c.c.height * 4;
+    return { items: itemSprites.size, bodies: bodySprites.size, mb: +(bytes / 1048576).toFixed(1), waiting: urgent.size + warm.length + (job ? 1 : 0) };
+  }
+  // the old way, for the moments before a sprite is ready
+  function drawItemDirect(item, x, y, size) {
+    ctx.save();
+    if (item.kind === 'text') {
+      ctx.font = `900 ${size * 1.3}px ${TEXT_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = size * 0.14; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round'; ctx.strokeText(item.glyph, x, y + size * 0.06);
+    }
+    paintGlyph(ctx, item, x, y, size);
+    if (item.kind === 'shape') { ctx.lineWidth = size * 0.08; ctx.strokeStyle = '#fff'; ctx.lineJoin = 'round'; ctx.stroke(); }
+    ctx.restore();
+  }
+  // S is the size the sprite was built for (SB, SR or SK): drawing only ever scales it down
+  function drawItem(item, x, y, size, alpha, S) {
     if (item.kind === 'color') return;
-    const S = itemBucket(ref, mult), sp = itemSprite(item, S);
-    if (!sp) return;
-    const k = size / S, w = sp.side * k;
+    const sp = itemSprite(item, S);
     ctx.globalAlpha = alpha;
-    ctx.drawImage(sp.c, x - w / 2, y - w / 2, w, w);
+    if (!sp) drawItemDirect(item, x, y, size);
+    else {
+      const w = sp.side * size / S;
+      ctx.drawImage(sp.c, x - w / 2, y - w / 2, w, w);
+      if (item.kind !== 'emoji') { ctx.save(); paintGlyph(ctx, item, x, y, size); ctx.restore(); } // letters and shapes: color drawn live on the baked outline
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -521,14 +586,8 @@
   }
 
   function buildSprites() {
-    bodySprites.clear(); itemSprites.clear(); pending.clear(); job = null; scratchLayers.clear();
     cloudSprites = CLOUDS.map(c => paintCloud(unit() * 0.13 * c.s));
-    // warm the common bubble looks so the first pops don't hitch
-    const r0 = baseR();
-    for (const k of [0.7, 0.8, 1, 1.25, 1.75]) {
-      const R = bucket(r0 * k + 2);
-      for (let h = 0; h < HUES; h++) bodySprite({ hue: h * (360 / HUES), item: { kind: 'emoji' } }, R);
-    }
+    warmUp(true);
   }
 
   function drawClouds(now) {
@@ -550,9 +609,10 @@
       ctx.beginPath(); ctx.arc(b.x, b.y, r * (1.12 + k * 0.08), 0, Math.PI * 2);
       ctx.lineWidth = 6; ctx.strokeStyle = `rgba(255,210,63,${0.5 + k * 0.5})`; ctx.stroke();
     }
-    const R = bucket(b.r * 1.04 + 2), sp = bodySprite(b, R), k = r / R, w = sp.side * k;
-    ctx.drawImage(sp.c, b.x - w / 2, b.y - w / 2, w, w);
-    if (b.item.kind !== 'color') drawItem(b.item, b.x, b.y, r * 0.75, 0.95, b.r, 0.8);
+    const R = bucket(b.r * 1.04 + 2), sp = bodySprite(b, R);
+    if (sp) { const w = sp.side * r / R; ctx.drawImage(sp.c, b.x - w / 2, b.y - w / 2, w, w); }
+    else paintBody(ctx, b.x, b.y, r, b.item.kind === 'color' ? b.item.color : null, hueOf(b) * (360 / HUES)); // not warmed yet
+    if (b.item.kind !== 'color') drawItem(b.item, b.x, b.y, r * 0.75, 0.95, SB);
     ctx.beginPath(); ctx.ellipse(b.x - r * 0.4, b.y - r * 0.45, r * 0.22, r * 0.11, -0.7, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
   }
@@ -617,7 +677,7 @@
         ctx.beginPath(); ctx.arc(0, 0, size * 0.6, 0, Math.PI * 2); ctx.fillStyle = r.item.color; ctx.fill();
         ctx.lineWidth = 5; ctx.strokeStyle = '#fff'; ctx.stroke();
       } else {
-        drawItem(r.item, 0, 0, size, alpha, r.r, 1.4);
+        drawItem(r.item, 0, 0, size, alpha, SR);
       }
       // numbers: show that many dots so counting is concrete
       if (r.item.count) {
@@ -651,13 +711,13 @@
     if (target.kind === 'color') {
       ctx.beginPath(); ctx.arc(s * 0.35, 0, s * 0.42, 0, Math.PI * 2); ctx.fillStyle = target.color; ctx.fill();
       ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(43,45,92,.3)'; ctx.stroke();
-    } else drawItem(target, s * 0.35, 0, s * 0.62, 1, s * 0.62, 1);
+    } else drawItem(target, s * 0.35, 0, s * 0.62, 1, SK);
     ctx.restore();
   }
 
   function loop(t) {
     const dt = Math.min(0.05, (t - last) / 1000); last = t;
-    update(dt); draw(); buildPending(); requestAnimationFrame(loop);
+    update(dt); draw(); buildSlice(dt < 0.025 ? 3 : 1); requestAnimationFrame(loop);
   }
 
   // ---------- Grown-up panel (press & hold 1.5s) ----------
@@ -679,6 +739,7 @@
   document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
     settings.mode = b.dataset.mode; saveSettings(); syncPanel();
     for (const bb of bubbles) bb.item = makeItem(settings.mode); // switch what's on screen right away
+    warmUp(false); // the new mode's glyphs (and tinted bodies) get warmed
     target = null; newTarget();
   });
   document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { settings.speed = +b.dataset.speed; saveSettings(); syncPanel(); });
@@ -692,15 +753,15 @@
   };
   document.getElementById('done').onclick = () => { panel.classList.remove('open'); audio(); };
 
-  resize(); // sizes the canvas and builds the sprites
+  resize(); // sizes the canvas and queues the sprites
   // start with the sky already full
   for (let i = 0, n = maxBubbles(); i < n; i++) spawnBubble(undefined, H * (0.1 + 0.9 * (i + Math.random()) / n), { giant: false });
   newTarget();
-  flushPending(); // first frame starts with every glyph ready
   requestAnimationFrame(loop);
   // ?debug: a read-only snapshot for automated testing
   if (/[?&]debug/.test(location.search)) window.__bubblePop = () => ({ target: target && target.id, found, bubbles: bubbles.length,
-    targets: bubbles.filter(b => target && b.item.id === target.id).map(b => ({ x: b.x, y: b.y })) });
+    targets: bubbles.filter(b => target && b.item.id === target.id).map(b => ({ x: b.x, y: b.y })),
+    sprites: cacheStats() });
 
   // Offline support (only works over HTTPS or localhost)
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
