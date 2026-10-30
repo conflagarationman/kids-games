@@ -224,6 +224,7 @@
   }
 
   function paintSegment(s, x, y) {
+    dirty = true;
     const d = Math.hypot(x - s.x, y - s.y), c = strokeColor(s, d);
     pctx.save();
     pctx.lineCap = pctx.lineJoin = 'round';
@@ -243,6 +244,7 @@
   }
 
   function addStamp(x, y) {
+    dirty = true;
     stampSound();
     stamps.push({ x, y, glyph: pick(STAMPS[settings.stamps] || STAMPS.mix), t: 0, size: unit() * (0.11 + Math.random() * 0.05), rot: (Math.random() - 0.5) * 0.5 });
     burst(x, y, 12, unit() * 0.3);
@@ -404,11 +406,59 @@
     }
     labels = lab; boxes = bb; runs = sorted; runAt = at;
   }
+  // ---------- Each page keeps its own painting (in memory only) ----------
+  // Leaving a page snapshots the paint layer to a small PNG blob (full-size canvases per page would be too much memory on a big iPad).
+  // An entry is { box, blobs: [Promise<Blob>] }; toBlob copies the bitmap right away, so clearing straight after is safe, and
+  // a promise lets a quick switch back wait for the encode instead of finding nothing.
+  const saved = new Map(); // page name ('' = blank paper) -> entry
+  let dirty = false, visits = 0, restoring = null; // dirty: the paint layer has something on it; restoring: name of the page whose snapshot is still loading, or null
+  const sameBox = (a, b) => !a && !b || a && b && Math.abs(a.cx - b.cx) < 0.01 && Math.abs(a.cy - b.cy) < 0.01 && Math.abs(a.S - b.S) < 0.01;
+  const boxOf = () => page ? { cx: page.cx, cy: page.cy, S: page.S } : null;
+  function bakeAll() {
+    // stamps and fills still animating are part of the picture
+    for (const s of stamps) drawStamp(pctx, s, 1);
+    for (const f of fills) { pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.drawImage(f.fc, f.x0, f.y0, f.fw, f.fh, f.x0, f.y0, f.fw, f.fh); pctx.restore(); giveFillCanvas(f); }
+    stamps.length = 0; fills.length = 0;
+  }
+  function leavePage() {
+    const key = settings.page, e = saved.get(key);
+    if (restoring === key) {
+      // the page's old snapshot hasn't been drawn back yet: keep it, and add anything painted since as a layer on top
+      if (dirty) { bakeAll(); e.blobs.push(new Promise(res => paint.toBlob(res, 'image/png'))); }
+      return;
+    }
+    if (!dirty) { saved.delete(key); return; }
+    bakeAll();
+    saved.set(key, { box: boxOf(), blobs: [new Promise(res => paint.toBlob(res, 'image/png'))] });
+  }
+  function restorePage() {
+    const key = settings.page, e = saved.get(key);
+    if (!e) return;
+    if (!sameBox(e.box, boxOf())) { saved.delete(key); return; } // the screen changed shape and the page moved: that painting no longer lines up
+    const visit = visits; restoring = key;
+    Promise.all(e.blobs).then(bs => Promise.all(bs.filter(Boolean).map(b => createImageBitmap(b)))).then(bmps => {
+      // the kid moved on to another page meanwhile: leave the snapshot saved for next time
+      if (visit !== visits) { bmps.forEach(b => b.close()); return; }
+      restoring = null;
+      if (saved.get(key) !== e) { bmps.forEach(b => b.close()); return; } // cleared meanwhile
+      saved.delete(key);
+      if (!sameBox(e.box, boxOf())) { bmps.forEach(b => b.close()); return; } // resized meanwhile
+      // draw underneath whatever has been painted in the meantime, oldest layer lowest
+      pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.globalCompositeOperation = 'destination-over';
+      for (let i = bmps.length - 1; i >= 0; i--) { pctx.drawImage(bmps[i], 0, 0); bmps[i].close(); }
+      pctx.restore();
+      if (bmps.length) { dirty = true; blank = false; }
+    }).catch(() => { if (visit === visits) { restoring = null; saved.delete(key); } });
+  }
   function setPage(name) {
+    name = name || '';
+    if (name === settings.page) return; // already here: keep the painting
+    leavePage(); restoring = null; visits++;
     clearPaint();
-    settings.page = name || ''; saveSettings();
-    page = settings.page ? { name: settings.page, ...pageBox() } : null;
+    settings.page = name; saveSettings();
+    page = name ? { name, ...pageBox() } : null;
     drawOutline(); blank = true; idle = 0; syncPages();
+    restorePage();
   }
   // flood-fill the open area under the finger, then pour it in from that spot
   const rgbOf = (() => { const c = document.createElement('canvas').getContext('2d', { willReadFrequently: true }); c.canvas.width = c.canvas.height = 1;
@@ -473,7 +523,7 @@
       fx.putImageData(img, x0, y0);
     }
     const far = Math.hypot(Math.max(px - x0, x1 - px), Math.max(py - y0, y1 - py)); // farthest corner
-    fills.push({ fc, x0, y0, fw, fh, px, py, far, t: 0 });
+    fills.push({ fc, x0, y0, fw, fh, px, py, far, t: 0 }); dirty = true;
     pourSound();
     burst(x, y, 10, unit() * 0.25, css);
     return true;
@@ -484,7 +534,7 @@
   }
   function clearPaint() {
     pctx.save(); pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.clearRect(0, 0, paint.width, paint.height); pctx.restore();
-    stamps.length = 0; fills.length = 0;
+    stamps.length = 0; fills.length = 0; dirty = false;
   }
 
   // ---------- Input: drag paints, a quick tap stamps (or fills, on a coloring page); every finger counts ----------
@@ -663,7 +713,7 @@
   addEventListener('resize', syncPages);
   syncPalette();
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
-  document.getElementById('tClear').onclick = () => { clearPaint(); whooshSound(); blank = true; idle = 0; };
+  document.getElementById('tClear').onclick = () => { clearPaint(); saved.delete(settings.page); restoring = null; whooshSound(); blank = true; idle = 0; }; // this page only
   document.getElementById('tSave').onclick = () => {
     // flatten onto the paper color so the saved picture looks like the screen
     const out = document.createElement('canvas'); out.width = paint.width; out.height = paint.height;
