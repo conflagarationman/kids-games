@@ -15,14 +15,20 @@ Sessions can only test in a desktop preview browser with simulated touches and n
 
 Roughly in priority order. None are committed to. Check with the owner before starting one.
 
-1. **Web Hero: rescue mini-levels.** Web a falling kitten or ice cream before it lands, for variety between tower levels.
-2. **Web Hero: choice of hero,** a few original color and suit variants.
-3. **Web Hero: fuller Big levels on portrait iPads.** The narrow screen only fits about 2 vehicles; stack more vertically when tall.
-4. **Shared sound on or off:** the play-time limit is built (see History), but each game still has its own sound toggle. One switch on the home page could set them all.
-5. **Magic Paint: more pictures** (dinosaur, truck, rocket) and a few with more detail for older kids.
-6. **Little Band: keep the last recording** in `localStorage` so it survives a reload.
-7. **Web Hero: a cancelled pull still fires.** When the browser cancels a pull (`pointercancel`, e.g. a system popup), the shot is dropped. Firing what was aimed would fit "a broken drag still does something sensible".
-8. **Where's the Cow?** A listening and vocabulary game for ages 3–4: animals shown, "Can you find the cow?" asked. Partly covered now by Bubble Pop's Find it mode.
+1. **Bubble Pop: a roguelike Adventure mode with a skill tree** (the owner's goal; a third mode next to Little and Big kid). Shaped for a 4-year-old and the "nothing to fail" rule:
+   - **A run is a journey, not a life.** About 8 to 10 levels on a little map, ending in a finale boss. A run always finishes with a celebration; there is no death and no game over.
+   - **Pick a power between levels:** 2 or 3 big picture cards, all good choices, with effects you can see straight away (magnet finger pulls nearby bubbles in, bigger pop blasts, slow-motion bubbles, a bubble buddy that pops on its own, a rainbow chain). Powers stack for the rest of the run.
+   - **Skill tree between runs:** stars earned in runs unlock permanent nodes, drawn as a tree of big sticker icons. Nodes add powers to the card pool and unlock bubble skins, sky themes and bosses. Nothing is ever lost, and a grown-up can reset it.
+   - **Needs saved progress** (stars, unlocked nodes, best scores), a deliberate exception to "only settings are saved". Keep it in its own key, separate from settings.
+   - **Build order:** (a) powers as occasional pickups in normal Big kid play, which tests what's fun; (b) the run structure with power picks; (c) the skill tree; (d) more bosses and map art.
+2. **Web Hero: rescue mini-levels.** Web a falling kitten or ice cream before it lands, for variety between tower levels.
+3. **Web Hero: choice of hero,** a few original color and suit variants.
+4. **Web Hero: fuller Big levels on portrait iPads.** The narrow screen only fits about 2 vehicles; stack more vertically when tall.
+5. **Shared sound on or off:** the play-time limit is built (see History), but each game still has its own sound toggle. One switch on the home page could set them all.
+6. **Magic Paint: more pictures** (dinosaur, truck, rocket) and a few with more detail for older kids.
+7. **Little Band: keep the last recording** in `localStorage` so it survives a reload.
+8. **Web Hero: a cancelled pull still fires.** When the browser cancels a pull (`pointercancel`, e.g. a system popup), the shot is dropped. Firing what was aimed would fit "a broken drag still does something sensible".
+9. **Where's the Cow?** A listening and vocabulary game for ages 3–4: animals shown, "Can you find the cow?" asked. Partly covered now by Bubble Pop's Find it mode.
 
 ## Research notes (why the games are built the way they are)
 
