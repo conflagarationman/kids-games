@@ -140,6 +140,10 @@
     <div class="toggles" data-only="big">
       <button id="tPowers" style="grid-column: span 3">✨ Rare power bubbles</button>
     </div>
+    <div class="label" data-only="little">Sky</div>
+    <div class="toggles" data-only="little">
+      <button id="tSky" style="grid-column: span 3">🌈 Sky changes color as bubbles pop</button>
+    </div>
     <div class="label">Taps to pop a boss</div>
     <div class="toggles">
       <button data-boss="8">8</button>
@@ -1865,6 +1869,7 @@
     document.getElementById('tVoice').classList.toggle('off', !settings.voice);
     document.getElementById('tLevels').classList.toggle('off', !settings.levels);
     document.getElementById('tStorm').classList.toggle('off', !settings.storm);
+    document.getElementById('tSky').classList.toggle('off', !settings.skyShift);
     document.getElementById('tPowers').classList.toggle('off', !settings.powers);
     document.getElementById('tBook').classList.toggle('off', !settings.book);
     document.querySelectorAll('[data-boss]').forEach(b => b.classList.toggle('on', +b.dataset.boss === settings.bossTaps));
@@ -1877,6 +1882,7 @@
     queueWarm(); // the new mode's glyphs (and tinted bodies) get warmed
     target = null; newTarget();
   });
+  document.getElementById('tSky').onclick = () => { settings.skyShift = !settings.skyShift; saveSettings(); syncPanel(); if (!settings.skyShift) resetSky(); };
   document.getElementById('tPowers').onclick = () => { settings.powers = !settings.powers; saveSettings(); syncPanel(); if (!settings.powers) { endPower(); bubbles.splice(0, bubbles.length, ...bubbles.filter(b => !b.power)); } else queueWarm(); };
   document.getElementById('tBook').onclick = () => { settings.book = !settings.book; saveSettings(); syncPanel(); bookBtn.hidden = !settings.book; };
   document.getElementById('tStorm').onclick = () => { settings.storm = !settings.storm; saveSettings(); syncPanel(); if (!settings.storm && storm) resetLevel(); };
