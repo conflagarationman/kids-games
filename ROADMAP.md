@@ -20,7 +20,7 @@ Roughly in priority order. None are committed to. Check with the owner before st
    - **Pick a power between levels:** 2 or 3 big picture cards with effects you can see straight away (magnet finger pulls nearby bubbles in, bigger pop blasts, slow-motion bubbles, a bubble buddy that pops on its own, a rainbow chain, an extra heart). Powers stack for the rest of the run.
    - **Skill tree between runs:** stars earned in runs unlock permanent nodes, drawn as a tree of big sticker icons. Nodes add powers to the card pool, add a starting heart, and unlock bubble skins, sky themes and bosses. A grown-up can reset it.
    - **Needs saved progress** (stars, unlocked nodes, best run), a deliberate exception to "only settings are saved". Keep it in its own key, separate from settings, like the Big kid best score.
-   - **Build order:** (a) powers as occasional pickups in normal Big kid play (being built now), which tests what's fun; (b) the run structure with hearts and power picks; (c) the skill tree; (d) more bosses and map art.
+   - **Build order:** (a) powers as occasional pickups in normal Big kid play (built, see Bubble Pop notes: the `POWERS` table is ready to be dealt as cards); (b) the run structure with hearts and power picks; (c) the skill tree; (d) more bosses and map art.
 2. **Web Hero: rescue mini-levels.** Web a falling kitten or ice cream before it lands, for variety between tower levels.
 3. **Web Hero: choice of hero,** a few original color and suit variants.
 4. **Web Hero: fuller Big levels on portrait iPads.** The narrow screen only fits about 2 vehicles; stack more vertically when tall.
