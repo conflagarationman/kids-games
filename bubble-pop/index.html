@@ -97,6 +97,12 @@
     <div class="toggles">
       <button id="tLevels" style="grid-column: span 3">🏆 Levels and boss bubbles</button>
     </div>
+    <div class="label">Level length</div>
+    <div class="toggles">
+      <button data-len="15">Short</button>
+      <button data-len="23">Standard</button>
+      <button data-len="30">Long</button>
+    </div>
     <div class="label">Taps to pop a boss</div>
     <div class="toggles">
       <button data-boss="8">8</button>
@@ -155,8 +161,8 @@
   // survive switching. Only settings are saved here (the best score and the sticker book have their own keys, below).
   const KEY = 'bubblePop.kids.v1';
   const DEFAULTS = {
-    little: { mode: 'animals', sound: true, voice: true, speed: 0.4, find: false, levels: false, bossTaps: 12, size: 1.2, skyShift: true },
-    big: { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false, levels: true, bossTaps: 12, size: 1 },
+    little: { mode: 'animals', sound: true, voice: true, speed: 0.4, find: false, levels: false, bossTaps: 12, levelLen: 23, size: 1.2, skyShift: true },
+    big: { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false, levels: true, bossTaps: 12, levelLen: 23, size: 1 },
   };
   const all = { little: { ...DEFAULTS.little }, big: { ...DEFAULTS.big } };
   try {
@@ -383,7 +389,9 @@
   let boss = null, card = null;
   const lastHit = new Map(), inBoss = new Map(); // by pointerId
   const STAR = { kind: 'shape', shape: 'Star', color: '#ffc21a' }, HAND = { kind: 'emoji', glyph: '👆' };
-  const popsNeeded = () => QUICK ? 3 : settings.find ? 5 : 15;
+  // level length: Short, Standard (the default) and Long; Find it levels count correct finds, so they are a bit shorter
+  const LEVEL_POPS = { 15: 5, 23: 8, 30: 10 };
+  const popsNeeded = () => QUICK ? 3 : settings.find ? LEVEL_POPS[settings.levelLen] || 8 : [15, 23, 30].includes(settings.levelLen) ? settings.levelLen : 23;
   const bossNeed = () => QUICK ? 3 : settings.bossTaps;
   const isPlaying = () => !settings.levels || lv.phase === 'play';
   const themeOf = level => (level - 1) % THEMES.length;
@@ -743,7 +751,7 @@
     if (!settings.levels || lv.phase === 'break') return;
     const n = popsNeeded(), narrow = !settings.find && W < 560;
     const badgeB = 10 + SAT + Math.max(40, Math.min(64, unit() * 0.13)) * 1.35;
-    const avail = narrow ? W - 40 : W - 2 * 124, d = Math.max(9, Math.min(n <= 5 ? 24 : 18, avail / (n * 1.55))), step = d * 1.55;
+    const avail = narrow ? W - 40 : W - 2 * 124, d = Math.max(6, Math.min(n <= 5 ? 24 : 18, avail / (n * 1.55))), step = d * 1.55;
     const y = settings.find ? badgeB + 14 + d / 2 : narrow ? SAT + 70 : SAT + 32, x0 = W / 2 - (n - 1) * step / 2;
     ctx.lineWidth = 2.5;
     for (let i = 0; i < n; i++) {
@@ -1256,6 +1264,7 @@
     document.querySelectorAll('[data-find]').forEach(b => b.classList.toggle('on', +b.dataset.find === +settings.find));
     document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('on', +b.dataset.speed === settings.speed));
     document.querySelectorAll('[data-size]').forEach(b => b.classList.toggle('on', +b.dataset.size === settings.size));
+    document.querySelectorAll('[data-len]').forEach(b => b.classList.toggle('on', +b.dataset.len === settings.levelLen));
     document.getElementById('whoLine').textContent = who === 'little' ? '🧸 These are the Little settings (toddler). Switch who is playing below.' : '🚀 These are the Big kid settings. Switch who is playing below.';
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
     document.getElementById('tVoice').classList.toggle('off', !settings.voice);
@@ -1270,6 +1279,7 @@
     queueWarm(); // the new mode's glyphs (and tinted bodies) get warmed
     target = null; newTarget();
   });
+  document.querySelectorAll('[data-len]').forEach(b => b.onclick = () => { settings.levelLen = +b.dataset.len; saveSettings(); syncPanel(); resetLevel(); target = null; newTarget(); });
   document.querySelectorAll('[data-size]').forEach(b => b.onclick = () => {
     const k = +b.dataset.size / (settings.size || 1);
     settings.size = +b.dataset.size; saveSettings(); syncPanel();
@@ -1304,8 +1314,8 @@
   // ?debug: a read-only snapshot for automated testing
   if (/[?&]debug/.test(location.search)) window.__bubblePop = () => ({ target: target && target.id, found, bubbles: bubbles.length,
     targets: bubbles.filter(b => target && b.item.id === target.id).map(b => ({ x: b.x, y: b.y })),
-    sprites: cacheStats(),
-    level: lv.level, phase: settings.levels ? lv.phase : 'play', pops: lv.pops, popsNeeded: popsNeeded(), bossHits: boss ? boss.hits : 0, bossTaps: bossNeed(),
+    sprites: cacheStats(), pts: bubbles.map(b => ({ x: b.x, y: b.y, r: b.r, gold: !!b.gold, rainbow: !!b.rainbow, power: b.power || null, leave: !!b.leave })),
+    level: lv.level, phase: settings.levels ? lv.phase : 'play', pops: lv.pops, popsNeeded: popsNeeded(), levelLength: settings.levelLen, who, bossHits: boss ? boss.hits : 0, bossTaps: bossNeed(),
     look: lv.look, theme: THEMES[theme], stars: lv.stars, popCount, confetti: confetti.length, hint: !!boss && boss.idle >= 8, breakT: lv.t,
     boss: bossUp() ? { ...bossPos(), r: bossR() } : null, leaving: bubbles.filter(b => b.leave).length });
 
