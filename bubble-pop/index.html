@@ -43,6 +43,25 @@
   .toggles button.off { opacity: .45; }
   .toggles button.on { border-color: #38c6f4; background: #e3f7ff; }
   .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
+  /* sticker book: a big button top-left (the top-right corner is the gear and the bedtime ring) and a full-screen album */
+  #bookBtn { position: fixed; top: calc(10px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left)); width: 58px; height: 58px; border-radius: 20px; border: 3px solid #fff; background: rgba(255,255,255,.5); font-size: 30px; line-height: 1; padding: 0; z-index: 3; touch-action: manipulation; box-shadow: 0 3px 10px rgba(43,45,92,.2); }
+  #bookBtn.bump { animation: bump .55s ease; }
+  @keyframes bump { 30% { transform: scale(1.3) rotate(-8deg); } 60% { transform: scale(.95) rotate(4deg); } }
+  #book { position: fixed; inset: 0; background: rgba(43,45,92,.5); display: none; z-index: 4; }
+  #book.open { display: block; }
+  .sheet { position: absolute; top: max(14px, env(safe-area-inset-top)); left: max(14px, env(safe-area-inset-left)); right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; overflow: hidden; border-radius: 28px; border: 5px solid #fff; background: linear-gradient(180deg, #e6f6ff 0%, #ece3ff 60%, #ffe6f4 100%); box-shadow: 0 12px 40px rgba(0,0,0,.3); }
+  .bhead { min-height: 74px; padding: 14px 76px 4px 18px; font: 900 26px/1.1 "Kids Rounded", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif; color: #2b2d5c; }
+  #bookClose { position: absolute; top: 8px; right: 8px; width: 58px; height: 58px; border-radius: 50%; border: 3px solid #fff; background: #ff6fb1; color: #fff; font-size: 26px; font-weight: 900; line-height: 1; padding: 0; touch-action: manipulation; z-index: 1; }
+  .tabs { display: flex; gap: 6px; padding: 8px 10px; }
+  .tabs button { flex: 1; min-height: 62px; border-radius: 18px; border: 3px solid transparent; background: rgba(255,255,255,.6); color: #2b2d5c; font-size: 26px; line-height: 1.1; padding: 4px 0; touch-action: manipulation; }
+  .tabs button small { display: block; font: 800 12px "Trebuchet MS", sans-serif; opacity: .65; }
+  .tabs button.on { border-color: #38c6f4; background: #fff; }
+  .bgrid { flex: 1; overflow-y: auto; padding: 8px 12px 28px; display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 10px; align-content: start; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+  .cell { aspect-ratio: 1; border-radius: 22px; border: 3px solid #fff; background: rgba(255,255,255,.7); padding: 0; position: relative; overflow: visible; touch-action: manipulation; }
+  .cell.miss { background: rgba(255,255,255,.35); }
+  .cell canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .cell.wig canvas { animation: wig .6s ease; }
+  @keyframes wig { 20% { transform: rotate(-14deg) scale(1.12); } 45% { transform: rotate(11deg) scale(1.12); } 70% { transform: rotate(-6deg); } }
   #whoLine { margin: 0 0 6px; font-weight: 800; font-size: 14px; opacity: 1; color: #2b2d5c; background: #fff0f8; border-radius: 12px; padding: 8px 10px; }
   /* some settings only belong to one of the two modes */
   body[data-who="little"] [data-only="big"], body[data-who="big"] [data-only="little"] { display: none !important; }
@@ -52,6 +71,14 @@
 <body>
 <div class="sky" id="skyA"></div><div class="sky" id="skyB"></div>
 <canvas id="c"></canvas>
+
+<button id="bookBtn" aria-label="Sticker book">📖</button>
+<div id="book"><div class="sheet">
+  <button id="bookClose" aria-label="Close the sticker book">✖</button>
+  <div class="bhead">My stickers</div>
+  <div class="tabs" id="bookTabs"></div>
+  <div class="bgrid" id="bookGrid"></div>
+</div></div>
 
 <button id="parentBtn" aria-label="Grown-up settings (press and hold)">⚙️<span class="ring"></span></button>
 
@@ -113,9 +140,14 @@
       <button data-boss="12">12</button>
       <button data-boss="20">20</button>
     </div>
+    <div class="label">Sticker book</div>
+    <div class="toggles">
+      <button id="tBook" style="grid-column: span 3">📖 Show the sticker book button</button>
+    </div>
     <div class="label">Progress</div>
     <div class="modes">
-      <button id="rBest">Reset best score</button>
+      <button id="rBest" data-only="big">Reset best score</button>
+      <button id="rBook">Reset sticker book</button>
     </div>
     <div data-kg-panel></div>
     <button class="done" id="done">Let's play!</button>
@@ -169,8 +201,8 @@
   // survive switching. Only settings are saved here (the best score and the sticker book have their own keys, below).
   const KEY = 'bubblePop.kids.v1';
   const DEFAULTS = {
-    little: { mode: 'animals', sound: true, voice: true, speed: 0.4, find: false, levels: false, bossTaps: 12, levelLen: 23, storm: false, size: 1.2, skyShift: true },
-    big: { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false, levels: true, bossTaps: 12, levelLen: 23, storm: true, size: 1 },
+    little: { mode: 'animals', sound: true, voice: true, speed: 0.4, find: false, levels: false, bossTaps: 12, levelLen: 23, storm: false, book: true, size: 1.2, skyShift: true },
+    big: { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false, levels: true, bossTaps: 12, levelLen: 23, storm: true, book: true, size: 1 },
   };
   const all = { little: { ...DEFAULTS.little }, big: { ...DEFAULTS.big } };
   try {
@@ -358,6 +390,7 @@
         t: 0, life: 0.6, r: 3 + Math.random() * 5, hue: (b.hue + k * 20) % 360 });
     }
     reveals.push({ x: b.x, y: b.y, r: b.r, item: b.item, t: 0 });
+    collect(b.item, b.x, b.y, b.r);
     if (storm && storm.phase === 'rain') stormScore(b);
     if (b.giant && live) {
       // a giant bubble bursts into four little bubbles that scatter
@@ -454,6 +487,7 @@
     w = w === 'little' ? 'little' : 'big';
     if (w === who) return;
     who = w; settings = all[w]; document.body.dataset.who = w;
+    closeBook(); flies.length = 0; bookBtn.hidden = !settings.book;
     resetLevel();
     lv.level = 1; lv.stars = 0;
     bubbles.length = 0; reveals.length = 0; particles.length = 0; confetti.length = 0;
@@ -466,7 +500,7 @@
   const bossR = () => unit() * 0.225; // about 0.45 of the short side across
   const bossUp = () => boss && lv.phase === 'boss';
   function bossPos() {
-    const R = bossR(), cy = Math.max(H * 0.42, SAT + 46 + R * 1.55); // clear of the pips, whatever the shape of the screen
+    const R = bossR(), cy = Math.max(H * 0.42, SAT + 62 + R * 1.55); // clear of the pips, whatever the shape of the screen
     const p = clamp01((boss.t - 0.4) / 1.5), from = H + R * 1.9;
     return { x: W / 2, y: from + (cy - from) * backOut(p) + Math.sin(boss.t * 1.7) * R * 0.045 };
   }
@@ -536,6 +570,7 @@
     }
     for (let k = 0; k < 170; k++) addConfetti(c.x + (Math.random() - 0.5) * W * 0.8, c.y - Math.random() * H * 0.5, 140, 60);
     if (boss.item && boss.item.kind !== 'color') reveals.push({ x: c.x, y: c.y, r: R, item: boss.item, t: 0 });
+    if (boss.item) collect(boss.item, c.x, c.y, R * 0.5);
     boss = null; lv.phase = 'break'; lv.t = 0; lv.stars++; lv.themed = false; lv.starFx = false; card = null;
     inBoss.clear();
   }
@@ -866,6 +901,102 @@
     ctx.globalAlpha = 1;
   }
 
+  // ---------- Sticker book ----------
+  // Every distinct thing a child pops is collected into an album. Progress beyond settings, saved in its own key
+  // (a list of item ids), a deliberate exception to "only settings are saved".
+  const STICK_KEY = 'bubblePop.stickers.v1';
+  const stickers = new Set();
+  try { const a = JSON.parse(localStorage.getItem(STICK_KEY)); if (Array.isArray(a)) for (const id of a) if (typeof id === 'string') stickers.add(id); } catch (e) {}
+  const saveStickers = () => { try { localStorage.setItem(STICK_KEY, JSON.stringify([...stickers])); } catch (e) {} };
+  const CATALOG = [
+    { icon: '🐶', label: 'Animals', items: ANIMALS.map(([e, n]) => ({ id: 'a' + n, name: n, item: { kind: 'emoji', glyph: e } })) },
+    { icon: '🎨', label: 'Colors', items: COLORS.map(([n, c]) => ({ id: 'c' + n, name: n, item: { kind: 'color', color: c } })) },
+    { icon: '🔤', label: 'Letters', items: LETTERS.map((l, i) => ({ id: 'l' + l, name: l, item: { kind: 'text', glyph: l, color: BRIGHT[i % 7] } })) },
+    { icon: '🔢', label: 'Numbers', items: Array.from({ length: 10 }, (_, i) => ({ id: 'n' + (i + 1), name: String(i + 1), item: { kind: 'text', glyph: String(i + 1), color: BRIGHT[i % 7] } })) },
+    { icon: '⭐', label: 'Shapes', items: SHAPES.map((sh, i) => ({ id: 's' + sh, name: sh, item: { kind: 'shape', shape: sh, color: BRIGHT[i % 7] } })) },
+  ];
+  const KNOWN = new Set(CATALOG.flatMap(c => c.items.map(e => e.id)));
+  const bookBtn = document.getElementById('bookBtn'), bookEl = document.getElementById('book'), bookGrid = document.getElementById('bookGrid'), bookTabs = document.getElementById('bookTabs');
+  const flies = [];
+  let bookOpen = false, bookTab = 0, bookAt = 0;
+  const FLY = 0.85;
+
+  // a new one: a small copy of its sticker flies up to the book
+  function collect(item, x, y, r) {
+    if (!item || !KNOWN.has(item.id) || stickers.has(item.id)) return;
+    stickers.add(item.id); saveStickers();
+    if (settings.book && !bookBtn.hidden) {
+      const b = bookBtn.getBoundingClientRect();
+      flies.push({ item, x0: x, y0: y, x1: b.left + b.width / 2, y1: b.top + b.height / 2, r: r || baseR(), t: 0 });
+      if (settings.sound && audio()) tone(NOTES[5], actx.currentTime, 0.3, 'sine', 0.06);
+    }
+  }
+  function updateFlies(dt) {
+    for (let i = flies.length - 1; i >= 0; i--) {
+      const f = flies[i]; f.t += dt;
+      if (f.t < FLY) continue;
+      flies.splice(i, 1);
+      bookBtn.classList.remove('bump'); void bookBtn.offsetWidth; bookBtn.classList.add('bump');
+      for (let k = 0; k < 12; k++) { const a = Math.random() * 6.28, sp = 60 + Math.random() * 110; particles.push({ x: f.x1, y: f.y1, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, life: 0.6, r: 2.5 + Math.random() * 3, hue: 40 + Math.random() * 30, star: true }); }
+      if (settings.sound && audio()) { const t = actx.currentTime; tone(NOTES[6], t, 0.35, 'triangle', 0.08); tone(NOTES[7], t + 0.09, 0.45, 'sine', 0.06); }
+    }
+  }
+  function drawFlies() {
+    for (const f of flies) {
+      const p = clamp01(f.t / FLY), e = p * p * (3 - 2 * p), x = f.x0 + (f.x1 - f.x0) * e, y = f.y0 + (f.y1 - f.y0) * e - Math.sin(Math.PI * p) * H * 0.09;
+      const size = f.r * 0.8 * (1 - e) + 24 * e;
+      if (f.item.kind === 'color') { ctx.beginPath(); ctx.arc(x, y, size * 0.55, 0, 7); ctx.fillStyle = f.item.color; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke(); }
+      else drawItem(f.item, x, y, size, 1);
+    }
+  }
+
+  // ---- the album ----
+  function paintCell(cv, e, got) {
+    const s = cv.clientWidth || 86, g = cv.getContext('2d'), it = e.item;
+    cv.width = cv.height = Math.ceil(s * DPR); g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (it.kind === 'color') {
+      paintBody(g, s / 2, s / 2, s * 0.36, got ? it.color : '#dcd9ee', 0, true);
+      if (!got) { g.font = `900 ${s * 0.3}px ${TEXT_FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#fff'; g.fillText('?', s / 2, s / 2 + s * 0.02); }
+      return;
+    }
+    stickerOnto(g, it, s / 2, s / 2, s * 0.52);
+    if (!got) { g.save(); g.globalCompositeOperation = 'source-in'; g.fillStyle = 'rgba(150,148,190,.38)'; g.fillRect(0, 0, s, s); g.restore(); } // a soft gray silhouette
+  }
+  function renderTab(tab) {
+    bookTab = tab;
+    const cat = CATALOG[tab];
+    [...bookTabs.children].forEach((b, i) => b.classList.toggle('on', i === tab));
+    bookGrid.textContent = ''; bookGrid.scrollTop = 0;
+    const cells = cat.items.map(e => {
+      const got = stickers.has(e.id), b = document.createElement('button'), cv = document.createElement('canvas');
+      b.className = 'cell ' + (got ? 'got' : 'miss'); b.setAttribute('aria-label', got ? e.name : 'Not found yet');
+      b.appendChild(cv); bookGrid.appendChild(b);
+      b.onclick = () => { b.classList.remove('wig'); void b.offsetWidth; b.classList.add('wig'); if (got) say(e.name + '!'); };
+      return [cv, e, got];
+    });
+    for (const [cv, e, got] of cells) paintCell(cv, e, got); // laid out now, so the canvases know their size
+  }
+  function buildTabs() {
+    bookTabs.textContent = '';
+    CATALOG.forEach((c, i) => {
+      const b = document.createElement('button'), n = c.items.filter(e => stickers.has(e.id)).length;
+      b.innerHTML = `${c.icon}<small>${n}/${c.items.length}</small>`; b.setAttribute('aria-label', c.label);
+      b.onclick = () => renderTab(i);
+      bookTabs.appendChild(b);
+    });
+  }
+  function openBook() {
+    if (bookOpen) return;
+    bookOpen = true; bookAt = performance.now(); down.clear(); fingers.clear(); inBoss.clear();
+    bookEl.classList.add('open'); buildTabs(); renderTab(bookTab);
+  }
+  function closeBook() { if (!bookOpen) return; bookOpen = false; bookEl.classList.remove('open'); bookGrid.textContent = ''; }
+  bookBtn.addEventListener('click', openBook);
+  document.getElementById('bookClose').addEventListener('click', closeBook);
+  bookEl.addEventListener('click', e => { if (e.target === bookEl && performance.now() - bookAt > 250) closeBook(); }); // the dimmed edge closes it too
+  addEventListener('keydown', e => { if (e.key === 'Escape') closeBook(); });
+  addEventListener('resize', () => { if (bookOpen) renderTab(bookTab); });
+
   // ---- boss looks ----
   // Static parts are painted once per boss into one master sprite (bubble, crown, content sticker, creature body);
   // cracks, eyes, mouth and sheen are drawn live over it.
@@ -1025,7 +1156,7 @@
     const n = popsNeeded(), narrow = !settings.find && W < 560;
     const badgeB = 10 + SAT + Math.max(40, Math.min(64, unit() * 0.13)) * 1.35;
     const avail = narrow ? W - 40 : W - 2 * 124, d = Math.max(6, Math.min(n <= 5 ? 24 : 18, avail / (n * 1.55))), step = d * 1.55;
-    const y = settings.find ? badgeB + 14 + d / 2 : narrow ? SAT + 70 : SAT + 32, x0 = W / 2 - (n - 1) * step / 2;
+    const y = settings.find ? badgeB + 14 + d / 2 : narrow ? SAT + 84 : SAT + 32, x0 = W / 2 - (n - 1) * step / 2;
     ctx.lineWidth = 2.5;
     for (let i = 0; i < n; i++) {
       const filled = i < lv.pops;
@@ -1039,7 +1170,7 @@
   }
 
   // ---------- Input: every finger counts, swiping pops too ----------
-  const down = new Set();
+  const down = new Set(), fingers = new Map(); // fingers: where each held pointer is (the magnet needs it)
   // A newborn bubble (a giant's minis, the boss's shower) appears right under the finger that popped its parent,
   // and a real finger always jiggles: without a moment's grace the jiggle swipes every mini away before it scatters.
   // A fresh tap still pops them at once.
@@ -1069,7 +1200,7 @@
   }
   let spoke = false; // iOS only lets the page talk after a touch, so the first question is asked again then
   cv.addEventListener('pointerdown', e => {
-    e.preventDefault(); audio(); down.add(e.pointerId);
+    e.preventDefault(); audio(); down.add(e.pointerId); fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (!spoke) { spoke = true; if (settings.find && target) setTimeout(ask, 700); }
     if (bossUp()) {
       const inside = overBoss(e.clientX, e.clientY);
@@ -1080,6 +1211,7 @@
   });
   cv.addEventListener('pointermove', e => {
     if (!down.has(e.pointerId)) return;
+    fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (bossUp()) {
       // a swipe counts once each time the finger comes into the boss
       const inside = overBoss(e.clientX, e.clientY), was = inBoss.get(e.pointerId);
@@ -1088,7 +1220,7 @@
     }
     touch(e.clientX, e.clientY, false);
   });
-  const lift = e => { down.delete(e.pointerId); inBoss.delete(e.pointerId); };
+  const lift = e => { down.delete(e.pointerId); fingers.delete(e.pointerId); inBoss.delete(e.pointerId); };
   addEventListener('pointerup', lift); addEventListener('pointercancel', lift);
   addEventListener('contextmenu', e => e.preventDefault());
   document.addEventListener('gesturestart', e => e.preventDefault()); // iOS pinch zoom
@@ -1443,6 +1575,7 @@
     const sp = settings.speed;
     updateLevels(dt, asleep ? 0 : dt); // bedtime freezes the boss and break clocks
     updateStorm(dt, asleep ? 0 : dt);
+    updateFlies(dt);
     // nobody's found it for a while: ask again and shimmer the right ones
     if (settings.find && target && isPlaying() && performance.now() - askedAt > 12000) { hintGlow = 1; ask(); }
     spawnT -= dt;
@@ -1523,7 +1656,7 @@
     }
     drawPips(now);
     if (settings.find && target && isPlaying()) drawTargetBadge(now);
-    drawRings();
+    drawRings(); drawFlies();
     if (storm) { if (storm.phase === 'rain') drawStormHud(now); drawStormCards(now); }
   }
 
@@ -1547,7 +1680,8 @@
 
   function loop(t) {
     const dt = Math.min(0.05, (t - last) / 1000); last = t;
-    update(dt); draw(); buildSlice(dt < 0.025 ? 3 : 1); requestAnimationFrame(loop);
+    if (!bookOpen) { update(dt); draw(); } // the game waits under the open album
+    buildSlice(dt < 0.025 ? 3 : 1); requestAnimationFrame(loop);
   }
 
   // ---------- Grown-up panel (press & hold 1.5s) ----------
@@ -1570,6 +1704,7 @@
     document.getElementById('tVoice').classList.toggle('off', !settings.voice);
     document.getElementById('tLevels').classList.toggle('off', !settings.levels);
     document.getElementById('tStorm').classList.toggle('off', !settings.storm);
+    document.getElementById('tBook').classList.toggle('off', !settings.book);
     document.querySelectorAll('[data-boss]').forEach(b => b.classList.toggle('on', +b.dataset.boss === settings.bossTaps));
   }
   document.getElementById('tLevels').onclick = () => { settings.levels = !settings.levels; saveSettings(); syncPanel(); resetLevel(); target = null; newTarget(); };
@@ -1580,6 +1715,7 @@
     queueWarm(); // the new mode's glyphs (and tinted bodies) get warmed
     target = null; newTarget();
   });
+  document.getElementById('tBook').onclick = () => { settings.book = !settings.book; saveSettings(); syncPanel(); bookBtn.hidden = !settings.book; };
   document.getElementById('tStorm').onclick = () => { settings.storm = !settings.storm; saveSettings(); syncPanel(); if (!settings.storm && storm) resetLevel(); };
   // a reset takes two taps so it can't happen by accident
   function twoTap(id, label, action) {
@@ -1590,6 +1726,7 @@
     };
   }
   twoTap('rBest', 'Reset best score', () => { best = 0; saveBest(); });
+  twoTap('rBook', 'Reset sticker book', () => { stickers.clear(); saveStickers(); });
   document.querySelectorAll('[data-len]').forEach(b => b.onclick = () => { settings.levelLen = +b.dataset.len; saveSettings(); syncPanel(); resetLevel(); target = null; newTarget(); });
   document.querySelectorAll('[data-size]').forEach(b => b.onclick = () => {
     const k = +b.dataset.size / (settings.size || 1);
@@ -1611,9 +1748,10 @@
   // The shared grown-up timer eases the sound down at bedtime and stops it at goodnight
   if (window.KidsGrownup) KidsGrownup.register({
     setVolume(v) { vol = v; asleep = false; if (out) out.gain.setTargetAtTime(v, actx.currentTime, 0.3); },
-    pause() { asleep = true; down.clear(); inBoss.clear(); if ('speechSynthesis' in window) speechSynthesis.cancel(); if (actx) actx.suspend(); },
+    pause() { asleep = true; down.clear(); fingers.clear(); inBoss.clear(); if ('speechSynthesis' in window) speechSynthesis.cancel(); if (actx) actx.suspend(); },
   });
 
+  bookBtn.hidden = !settings.book;
   resize(); // sizes the canvas and queues the sprites
   // Canvas text doesn't wait for web fonts, so the letter and number sprites are built again once the font is in.
   // Nothing waits on this: the game plays at once with the fallback font and swaps in a moment later.
@@ -1627,6 +1765,7 @@
   if (/[?&]debug/.test(location.search)) window.__bubblePop = () => ({ target: target && target.id, found, bubbles: bubbles.length,
     targets: bubbles.filter(b => target && b.item.id === target.id).map(b => ({ x: b.x, y: b.y })),
     sprites: cacheStats(), pts: bubbles.map(b => ({ x: b.x, y: b.y, r: b.r, gold: !!b.gold, rainbow: !!b.rainbow, power: b.power || null, leave: !!b.leave })),
+    stickers: stickers.size, book: bookOpen, power: null,
     storm: { on: !!storm, phase: storm ? storm.phase : null, score: storm ? storm.score : 0, best, t: storm ? +(storm.rt).toFixed(2) : 0, nb: !!(storm && storm.nb), shown: storm ? storm.show : 0 },
     level: lv.level, phase: settings.levels ? lv.phase : 'play', pops: lv.pops, popsNeeded: popsNeeded(), levelLength: settings.levelLen, who, bossHits: boss ? boss.hits : 0, bossTaps: bossNeed(),
     look: lv.look, theme: THEMES[theme], stars: lv.stars, popCount, confetti: confetti.length, hint: !!boss && boss.idle >= 8, breakT: lv.t,
