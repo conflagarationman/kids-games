@@ -23,6 +23,7 @@
   .sky { position: fixed; inset: 0; pointer-events: none; }
   #skyA { background: linear-gradient(180deg, #8fd8ff 0%, #c9b8ff 60%, #ffc6e5 100%); }
   #skyB { opacity: 0; }
+  #tint { background: rgba(60,120,255,.17); opacity: 0; transition: opacity .8s ease; } /* slow-mo's gentle blue */
 
   /* Parent button: small, faded, needs a long press so little fingers don't open it */
   #parentBtn { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.35); font-size: 20px; z-index: 3; touch-action: none; }
@@ -69,7 +70,7 @@
 <link rel="stylesheet" href="../shared/grownup.css">
 </head>
 <body>
-<div class="sky" id="skyA"></div><div class="sky" id="skyB"></div>
+<div class="sky" id="skyA"></div><div class="sky" id="skyB"></div><div class="sky" id="tint"></div>
 <canvas id="c"></canvas>
 
 <button id="bookBtn" aria-label="Sticker book">📖</button>
@@ -133,6 +134,10 @@
     <div class="label" data-only="big">Bonus round</div>
     <div class="toggles" data-only="big">
       <button id="tStorm" style="grid-column: span 3">🌧️ Bubble Storm after every 5th level</button>
+    </div>
+    <div class="label" data-only="big">Powers</div>
+    <div class="toggles" data-only="big">
+      <button id="tPowers" style="grid-column: span 3">✨ Rare power bubbles</button>
     </div>
     <div class="label">Taps to pop a boss</div>
     <div class="toggles">
@@ -201,8 +206,8 @@
   // survive switching. Only settings are saved here (the best score and the sticker book have their own keys, below).
   const KEY = 'bubblePop.kids.v1';
   const DEFAULTS = {
-    little: { mode: 'animals', sound: true, voice: true, speed: 0.4, find: false, levels: false, bossTaps: 12, levelLen: 23, storm: false, book: true, size: 1.2, skyShift: true },
-    big: { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false, levels: true, bossTaps: 12, levelLen: 23, storm: true, book: true, size: 1 },
+    little: { mode: 'animals', sound: true, voice: true, speed: 0.4, find: false, levels: false, bossTaps: 12, levelLen: 23, storm: false, powers: false, book: true, size: 1.2, skyShift: true },
+    big: { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false, levels: true, bossTaps: 12, levelLen: 23, storm: true, powers: true, book: true, size: 1 },
   };
   const all = { little: { ...DEFAULTS.little }, big: { ...DEFAULTS.big } };
   try {
@@ -328,7 +333,7 @@
     bubbles.push({
       x: x ?? openX(r),
       y: y ?? (H + r),
-      r, giant, item: newItem(),
+      r, giant, item: opts.item || newItem(), power: opts.power,
       vx: opts.vx || 0,
       vy: opts.vy ?? -(H * (RISE[0] + Math.random() * (RISE[1] - RISE[0]))) * (giant ? 0.7 : 1),
       phase: Math.random() * Math.PI * 2,
@@ -370,15 +375,15 @@
     setTimeout(() => { if (settings.find && !target && isPlaying()) { target = was; newTarget(); } }, 1600);
   }
 
-  function popBubble(i, quiet) {
+  function popBubble(i, quiet, noChain) { // quiet: no spoken name (power pops); quiet === 2: a chain, so only some pops sound
     const b = bubbles.splice(i, 1)[0];
     popCount++;
-    if (!quiet || Math.random() < 0.3) popSound(); // a chain of pops (the rainbow bubble) is a few sounds, not a wall
+    if (quiet !== 2 || Math.random() < 0.3) popSound(); // a chain of pops (the rainbow bubble) is a few sounds, not a wall
     const live = isPlaying(); // while a boss is up or a break is on, leftovers just pop: no Find it, no level credit
     const isTarget = live && settings.find && target && b.item.id === target.id;
     if (isTarget) foundIt(b);
     else {
-      if (!storm && !quiet) say(b.item.say); // the storm's only talking is counting
+      if (!storm && !quiet || b.power) say(b.item.say); // the storm's only talking is counting
       // after a few misses, ask again and make the right ones shimmer
       if (live && settings.find && target && ++wrongRun >= 3) { wrongRun = 0; hintGlow = 1; setTimeout(ask, 900); }
     }
@@ -402,6 +407,8 @@
     if (storm) { /* storm pops score in stormScore */ }
     else if (settings.levels) { if (live && (!settings.find || isTarget)) levelPop(); } // the boss pop is the celebration
     else if (!settings.find && popCount % 12 === 0) celebrate();
+    if (b.power && live) startPower(b.power);
+    if (power && power.def.onPop && !noChain && live) power.def.onPop(b);
     // keep the screen lively: a fresh bubble arrives soon after each pop
     setTimeout(() => { if (isPlaying() && bubbles.length < maxBubbles()) spawnBubble(); }, 400);
   }
@@ -457,6 +464,7 @@
   }
 
   function levelPop() {
+    if (lv.phase !== 'play') return; // a power's chain can fill the level in the middle of a pop
     lv.pops++; lv.pipT = 0;
     if (lv.pops >= popsNeeded()) startBoss();
   }
@@ -470,6 +478,7 @@
   function resetLevel() {
     const wasBreak = lv.phase === 'break' || (storm && storm.counts); // a break or a storm that was on counts as done
     if (storm) endStormNow();
+    endPower(); powerT = POWER_DEBUG ? 1.5 : 45 + Math.random() * 15; bubbles.splice(0, bubbles.length, ...bubbles.filter(b => !b.power));
     boss = null; card = null; lv.phase = 'play'; lv.pops = 0; lv.t = 0; lv.themed = false;
     if (wasBreak) lv.level++;
     inBoss.clear();
@@ -509,7 +518,7 @@
     return (x - c.x) ** 2 + (y - c.y) ** 2 <= r * r;
   }
   function startBoss() {
-    lv.phase = 'boss'; lv.t = 0;
+    lv.phase = 'boss'; lv.t = 0; endPower();
     for (const b of bubbles) b.leave = true; // the rest drift up and away
     const look = lv.level % 2 ? 'crown' : 'creature';
     boss = { look, t: 0, hits: 0, sqT: 9, idle: 0, shown: 0, hue: look === 'crown' ? (Math.random() * 360) | 0 : pick([150, 285, 20, 200]),
@@ -700,7 +709,6 @@
   const TENS = ['', 'Ten', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
   const tensWord = n => { const h = (n / 100) | 0, t = (n % 100) / 10; return (h ? ONES[h] + ' hundred' : '') + (h && t ? ' ' : '') + (t ? TENS[t] : ''); };
 
-  function endPower() {} // powers arrive in a later part
   function startStorm(counts, score = 0) {
     endPower();
     for (const b of bubbles) b.leave = true; // whatever is left of the last level drifts away
@@ -768,13 +776,13 @@
   }
   function updateStorm(dt, ldt) {
     stepPool(trails, dt, 0, 1); stepPool(fireworks, dt, 120, 0.985);
-    for (let i = rings.length - 1; i >= 0; i--) if ((rings[i].t += dt) > 0.9) rings.splice(i, 1);
+    for (let i = rings.length - 1; i >= 0; i--) if ((rings[i].t += dt) > (rings[i].dur || 0.9)) rings.splice(i, 1);
     if (!storm) return;
     const S = storm;
     S.t += ldt; S.bump = Math.max(0, S.bump - dt * 4); S.starT += dt; S.bannerT += dt;
     // pending chain pops, from the rainbow bubble
     const due = bubbles.filter(o => o.ct !== undefined && (o.ct -= dt) <= 0);
-    for (const o of due) { const i = bubbles.indexOf(o); if (i >= 0) popBubble(i, true); }
+    for (const o of due) { const i = bubbles.indexOf(o); if (i >= 0) popBubble(i, 2); }
     if (S.phase === 'card') { if (S.t >= STORM_CARD) { S.phase = 'rain'; S.rt = 0; S.spawnT = 0; } return; }
     if (S.phase === 'end') {
       if (S.t >= STORM_END) finishStorm();
@@ -894,8 +902,9 @@
   }
   function drawRings() {
     for (const r of rings) { // the rainbow's shockwave
-      const p = r.t / 0.9, rad = unit() * 1.2 * p;
+      const p = r.t / (r.dur || 0.9), rad = (r.max || unit() * 1.2) * p;
       ctx.globalAlpha = 1 - p; ctx.lineWidth = unit() * 0.03 * (1 - p) + 2;
+      if (r.col) { ctx.strokeStyle = r.col; ctx.lineWidth = 8 * (1 - p) + 2; ctx.beginPath(); ctx.arc(r.x, r.y, Math.max(1, rad), 0, 7); ctx.stroke(); continue; }
       for (let c = 0; c < 3; c++) { ctx.strokeStyle = BRIGHT[(c * 2) % 7]; ctx.beginPath(); ctx.arc(r.x, r.y, Math.max(1, rad - c * ctx.lineWidth), 0, 7); ctx.stroke(); }
     }
     ctx.globalAlpha = 1;
@@ -996,6 +1005,135 @@
   bookEl.addEventListener('click', e => { if (e.target === bookEl && performance.now() - bookAt > 250) closeBook(); }); // the dimmed edge closes it too
   addEventListener('keydown', e => { if (e.key === 'Escape') closeBook(); });
   addEventListener('resize', () => { if (bookOpen) renderTab(bookTab); });
+
+  // ---------- Powers (rare pickups in Big kid levels) ----------
+  // About once a minute of play a power bubble floats up with a big icon. Popping it starts the power for 8 seconds,
+  // shown by a banner with a ring that drains. Each power is { id, icon, name, start(), update(dt), draw(now), end() } (plus an
+  // optional onPop(b)), so the planned roguelike can deal them as cards. Not in storms or boss fights.
+  const POWER_T = 8;
+  const POWER_DEBUG = /[?&]debug/.test(location.search) && /[?&]power\b/.test(location.search);
+  const POWER_FORCE = POWER_DEBUG ? (/[?&]power=(\w+)/.exec(location.search) || [])[1] : null;
+  const BUDDY = '#7fdcff';
+  let buddyBody = null, power = null, powerT = POWER_DEBUG ? 1.5 : 45 + Math.random() * 15, lastPower = '', slow = 1, buddy = null;
+  const tintEl = document.getElementById('tint');
+  const powersOn = () => who === 'big' && settings.levels && settings.powers;
+
+  const POWERS = [
+    { id: 'magnet', icon: '🧲', name: 'Magnet',
+      // a held finger pulls the bubbles around it in
+      start() {}, end() {},
+      update(dt) {
+        const R = unit() * 0.45;
+        for (const f of fingers.values()) for (const b of bubbles) {
+          if (b.leave) continue;
+          const dx = f.x - b.x, dy = f.y - b.y, d = Math.hypot(dx, dy);
+          if (d >= R || d < 6) continue;
+          const mv = Math.min(d, (1 - d / R) * unit() * 1.1 * dt + 18 * dt);
+          b.x += dx / d * mv; b.y += dy / d * mv;
+        }
+      },
+      draw(now) {
+        const R = unit() * 0.45;
+        ctx.lineWidth = 4;
+        for (const f of fingers.values()) for (let k = 0; k < 2; k++) { // rings that shrink into the finger
+          const p = (now / 900 + k * 0.5) % 1;
+          ctx.globalAlpha = 0.75 * Math.sin(Math.PI * p); ctx.strokeStyle = k ? '#ff6fb1' : '#ffffff';
+          ctx.beginPath(); ctx.arc(f.x, f.y, R * (1 - p) + 14, 0, 7); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      } },
+    { id: 'slowmo', icon: '🐢', name: 'Slow-mo',
+      // everything drifts at half speed under a gentle blue tint
+      start() { slow = 0.5; tintEl.style.opacity = '1'; }, end() { slow = 1; tintEl.style.opacity = '0'; },
+      update() {}, draw() {} },
+    { id: 'bigpop', icon: '💥', name: 'Big pop',
+      // every pop also pops its neighbours, with a shockwave
+      start() {}, end() {}, update() {}, draw() {},
+      onPop(b) {
+        rings.push({ x: b.x, y: b.y, t: 0, dur: 0.5, max: b.r * 3.4, col: '#fff3a8' });
+        const near = bubbles.filter(o => !o.leave && Math.hypot(o.x - b.x, o.y - b.y) <= b.r * 1.5 + o.r);
+        for (const o of near) { const i = bubbles.indexOf(o); if (i >= 0 && isPlaying()) popBubble(i, true, true); }
+      } },
+    { id: 'buddy', icon: '🫧', name: 'Bubble buddy',
+      // an original little helper bubble with eyes zips around popping bubbles on its own
+      start() { buddy = { x: W * 0.5, y: H * 0.78, target: null, cool: 0.5, t: 0, trail: [] }; },
+      end() { buddy = null; },
+      update(dt) {
+        const B = buddy; if (!B) return;
+        B.t += dt; B.cool -= dt;
+        if (!B.target || !bubbles.includes(B.target) || B.target.leave) {
+          let bestD = Infinity; B.target = null;
+          for (const b of bubbles) { if (b.leave || b.y < 0 || b.y > H) continue; const d = Math.hypot(b.x - B.x, b.y - B.y); if (d < bestD) { bestD = d; B.target = b; } }
+        }
+        const sp = unit() * 1.15;
+        let tx = B.x + Math.cos(B.t * 2) * 30, ty = B.y + Math.sin(B.t * 2.6) * 20; // nothing to pop: bob about
+        if (B.target) { tx = B.target.x; ty = B.target.y; }
+        const dx = tx - B.x, dy = ty - B.y, d = Math.hypot(dx, dy) || 1, mv = Math.min(d, sp * dt);
+        B.x += dx / d * mv; B.y += dy / d * mv;
+        if ((B.trail[0] ? Math.hypot(B.trail[0].x - B.x, B.trail[0].y - B.y) : 99) > 10) { B.trail.unshift({ x: B.x, y: B.y }); if (B.trail.length > 6) B.trail.pop(); }
+        if (B.target && d < B.target.r * 0.85 + 14 && B.cool <= 0 && isPlaying()) {
+          const i = bubbles.indexOf(B.target); B.target = null; B.cool = 0.4;
+          if (i >= 0) popBubble(i, true);
+        }
+      },
+      draw(now) {
+        const B = buddy; if (!B) return;
+        const r = Math.max(24, Math.min(40, unit() * 0.05)), g = ctx;
+        for (let i = B.trail.length - 1; i >= 0; i--) { // a little whoosh of sparkles
+          g.globalAlpha = 0.5 * (1 - i / 7); g.fillStyle = BRIGHT[(i + 2) % 7];
+          g.beginPath(); g.arc(B.trail[i].x, B.trail[i].y, r * 0.22 * (1 - i / 8), 0, 7); g.fill();
+        }
+        g.globalAlpha = 1;
+        // a solid aqua body, so it never looks like a bubble to pop; one master, built the first time it is needed
+        const sp = buddyBody || (buddyBody = bodySprite({ item: { kind: 'color', color: BUDDY }, gold: false, hue: 0 })), bob = Math.sin(now / 160) * r * 0.05;
+        if (sp) { const w = sp.w * r / RM; g.drawImage(sp.c, B.x - w / 2, B.y - w / 2 + bob, w, w); } else paintBody(g, B.x, B.y + bob, r, BUDDY, 0, false);
+        strokeRim(g, B.x, B.y + bob, r);
+        const lx = B.target ? Math.max(-1, Math.min(1, (B.target.x - B.x) / 80)) : 0, ly = B.target ? Math.max(-1, Math.min(1, (B.target.y - B.y) / 80)) : 0;
+        for (const s of [-1, 1]) { // eyes that look where it is going
+          g.beginPath(); g.arc(B.x + s * r * 0.34, B.y - r * 0.12 + bob, r * 0.27, 0, 7); g.fillStyle = '#fff'; g.fill(); g.lineWidth = 1.5; g.strokeStyle = '#2b2d5c'; g.stroke();
+          g.beginPath(); g.arc(B.x + s * r * 0.34 + lx * r * 0.1, B.y - r * 0.12 + ly * r * 0.1 + bob, r * 0.13, 0, 7); g.fillStyle = '#2b2d5c'; g.fill();
+        }
+        g.fillStyle = 'rgba(255,111,160,.5)'; for (const s of [-1, 1]) { g.beginPath(); g.arc(B.x + s * r * 0.58, B.y + r * 0.22 + bob, r * 0.13, 0, 7); g.fill(); }
+        g.beginPath(); g.arc(B.x, B.y + r * 0.15 + bob, r * 0.25, 0.15 * Math.PI, 0.85 * Math.PI); g.lineWidth = 2.5; g.lineCap = 'round'; g.strokeStyle = '#2b2d5c'; g.stroke();
+        g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.ellipse(B.x - r * 0.45, B.y - r * 0.55 + bob, r * 0.2, r * 0.1, -0.7, 0, 7); g.fill();
+      } },
+  ];
+
+  function startPower(id) {
+    const def = POWERS.find(p => p.id === id); if (!def) return;
+    endPower();
+    power = { def, t: 0 }; lastPower = id; def.start();
+    if (settings.sound && audio()) { const t = actx.currentTime; [0, 2, 4, 7].forEach((n, i) => tone(NOTES[n], t + i * 0.07, 0.4, 'triangle', 0.11)); }
+  }
+  function endPower() {
+    if (!power) return;
+    power.def.end(); power = null;
+    if (settings.sound && audio()) { const t = actx.currentTime; tone(NOTES[4], t, 0.4, 'sine', 0.07); tone(NOTES[1], t + 0.12, 0.5, 'sine', 0.06); }
+  }
+  function spawnPowerBubble() {
+    const ids = POWERS.map(p => p.id).filter(i => i !== lastPower), id = POWER_FORCE && POWERS.some(p => p.id === POWER_FORCE) ? POWER_FORCE : pick(ids), def = POWERS.find(p => p.id === id);
+    const r = baseR() * 1.3;
+    spawnBubble(undefined, undefined, { giant: false, r, power: id, item: { kind: 'emoji', glyph: def.icon, say: def.name + '!', id: 'p' + id } });
+  }
+  function updatePower(dt, ldt) {
+    if (power) { power.t += ldt; power.def.update(dt); if (power && power.t >= POWER_T) endPower(); } // a power's own pop can fill the level, and the boss ends it
+    if (!powersOn() || !isPlaying() || power || bubbles.some(b => b.power)) return;
+    if ((powerT -= ldt) <= 0) { powerT = 45 + Math.random() * 15; spawnPowerBubble(); }
+  }
+  function drawPowerBanner(now) {
+    const t = power.t, a = Math.min(clamp01(t / 0.25), clamp01((POWER_T - t) / 0.8)), n = popsNeeded(), narrow = !settings.find && W < 560;
+    const badgeB = 10 + SAT + Math.max(40, Math.min(64, unit() * 0.13)) * 1.35;
+    const y = (settings.find ? badgeB + 38 : narrow ? SAT + 84 : SAT + 32) + 46, h = 58;
+    ctx.save(); ctx.globalAlpha = a;
+    ctx.font = `900 22px ${TEXT_FONT}`; const tw = ctx.measureText(power.def.name).width, w = h + tw + 26, x = W / 2 - w / 2;
+    roundRectPath(ctx, x, y - h / 2, w, h, h / 2); ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#ffd5ee'; ctx.stroke();
+    const ix = x + h / 2, rem = clamp01(1 - t / POWER_T);
+    ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(43,45,92,.12)'; ctx.beginPath(); ctx.arc(ix, y, h / 2 - 5, 0, 7); ctx.stroke();
+    ctx.strokeStyle = '#ff6fb1'; ctx.beginPath(); ctx.arc(ix, y, h / 2 - 5, -Math.PI / 2, -Math.PI / 2 + rem * Math.PI * 2); ctx.stroke(); // the ring drains
+    drawItem({ kind: 'emoji', glyph: power.def.icon }, ix, y, 30, 1);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#2b2d5c'; ctx.fillText(power.def.name, x + h + 2, y + 1);
+    ctx.restore();
+  }
 
   // ---- boss looks ----
   // Static parts are painted once per boss into one master sprite (bubble, crown, content sticker, creature body);
@@ -1295,7 +1433,7 @@
   const bodyKey = (tint, h) => String(tint || h);
   // the bubble body: a smooth gradient, so one master at 1 px per css px is enough; the rim is drawn live
   function bodySprite(b) {
-    const tint = b.gold ? GOLD : b.item.kind === 'color' ? b.item.color : null, key = bodyKey(tint, hueOf(b));
+    const tint = b.gold ? GOLD : b.power ? '#ffeaa6' : b.item.kind === 'color' ? b.item.color : null, key = bodyKey(tint, hueOf(b));
     const sp = bodySprites.get(key);
     if (!sp) want({ key, type: 'body', tint, h: hueOf(b) }, true);
     return sp;
@@ -1411,6 +1549,7 @@
     const m = settings.mode, all = m === 'mix', out = [];
     if (settings.levels || DEBUG_STORM) out.push(HAND, STAR); // the boss hint and the break card's stars
     if (stormOn() || DEBUG_STORM) out.push(CROWN);
+    if (powersOn() || POWER_DEBUG) for (const pw of POWERS) out.push({ kind: 'emoji', glyph: pw.icon });
     if (all || m === 'animals') for (const a of ANIMALS) out.push({ kind: 'emoji', glyph: a[0] });
     if (all || m === 'letters') for (const l of LETTERS) out.push({ kind: 'text', glyph: l });
     if (all || m === 'numbers') for (let n = 1; n <= 10; n++) out.push({ kind: 'text', glyph: String(n) });
@@ -1421,6 +1560,7 @@
   function queueWarm() {
     const tints = settings.mode === 'colors' || settings.mode === 'mix' ? COLORS.map(c => c[1]) : [];
     if (stormOn() || DEBUG_STORM) tints.push(GOLD);
+    if (powersOn() || POWER_DEBUG) tints.push('#ffeaa6');
     for (let h = 0; h < HUES; h++) want({ key: bodyKey(null, h), type: 'body', tint: null, h });
     for (const t of tints) want({ key: bodyKey(t, 0), type: 'body', tint: t, h: 0 });
     for (const it of warmItems()) want({ key: itemKey(it), type: 'item', item: it });
@@ -1558,10 +1698,10 @@
     const sp = b.rainbow ? (rainbowBody || (rainbowBody = paintRainbowBody())) : bodySprite(b);
     if (sp) { const w = sp.w * r / RM; ctx.drawImage(sp.c, b.x - w / 2, b.y - w / 2, w, w); strokeRim(ctx, b.x, b.y, r); }
     else paintBody(ctx, b.x, b.y, r, b.item.kind === 'color' ? b.item.color : null, hueOf(b) * (360 / HUES), true); // not warmed yet
-    if (b.item.kind !== 'color' && !b.rainbow) drawItem(b.item, b.x, b.y, r * 0.75, 0.95);
-    if (b.gold || b.rainbow) { // a shimmer: a bright rim pulse and twinkles going around
+    if (b.item.kind !== 'color' && !b.rainbow) drawItem(b.item, b.x, b.y, r * (b.power ? 0.95 : 0.75), 0.95);
+    if (b.gold || b.rainbow || b.power) { // a shimmer: a bright rim pulse and twinkles going around
       const k = 0.5 + 0.5 * Math.sin(now / 160 + b.phase);
-      ctx.lineWidth = 3; ctx.strokeStyle = `rgba(255,248,190,${0.45 + k * 0.5})`; ctx.beginPath(); ctx.arc(b.x, b.y, r * (1.06 + k * 0.06), 0, 7); ctx.stroke();
+      ctx.lineWidth = b.power ? 6 : 3; ctx.strokeStyle = b.power ? `rgba(255,190,40,${0.55 + k * 0.45})` : `rgba(255,248,190,${0.45 + k * 0.5})`; ctx.beginPath(); ctx.arc(b.x, b.y, r * (1.06 + k * 0.06), 0, 7); ctx.stroke();
       ctx.fillStyle = '#fff';
       for (let j = 0; j < 3; j++) { const a = now / 600 + j * 2.1 + b.phase; sparkle4(b.x + Math.cos(a) * r * 0.9, b.y + Math.sin(a) * r * 0.9, r * 0.13 * (0.4 + 0.6 * ((Math.sin(now / 130 + j * 2) + 1) / 2))); }
     }
@@ -1575,10 +1715,10 @@
     const sp = settings.speed;
     updateLevels(dt, asleep ? 0 : dt); // bedtime freezes the boss and break clocks
     updateStorm(dt, asleep ? 0 : dt);
-    updateFlies(dt);
+    updateFlies(dt); updatePower(dt, asleep ? 0 : dt);
     // nobody's found it for a while: ask again and shimmer the right ones
     if (settings.find && target && isPlaying() && performance.now() - askedAt > 12000) { hintGlow = 1; ask(); }
-    spawnT -= dt;
+    spawnT -= dt * slow;
     // the timer keeps a steady stream; the cap is only a ceiling for when lots of taps add extras
     if (spawnT <= 0 && isPlaying() && bubbles.length < maxBubbles() + 4) {
       spawnBubble();
@@ -1588,12 +1728,13 @@
     }
     for (let i = bubbles.length - 1; i >= 0; i--) {
       const b = bubbles[i];
-      b.phase += dt * 1.5;
-      b.x += (Math.sin(b.phase) * 20 + b.vx) * dt;
+      const ds = b.leave || b.storm ? dt : dt * slow; // slow-mo
+      b.phase += ds * 1.5;
+      b.x += (Math.sin(b.phase) * 20 + b.vx) * ds;
       b.vx *= 0.96; // the scatter from a giant pop slows to a drift
       if (b.leave) { b.lvy = Math.min(H * 0.55, (b.lvy || Math.abs(b.vy * sp)) + H * dt); b.y -= b.lvy * dt; } // speeding away once a boss is coming
       else if (b.storm) stormMove(b, dt);
-      else b.y += b.vy * sp * dt;
+      else b.y += b.vy * sp * ds;
       b.x = Math.max(b.r, Math.min(W - b.r, b.x));
       if (b.y < -b.r * 1.5) bubbles.splice(i, 1);
     }
@@ -1618,6 +1759,7 @@
     drawSky(now);
     drawPool(fireworks); drawPool(trails);
     for (const b of bubbles) drawBubble(b, now);
+    if (power) power.def.draw(now);
     drawBoss(); drawBossHint();
     for (const p of particles) {
       const k = 1 - p.t / p.life;
@@ -1657,6 +1799,7 @@
     drawPips(now);
     if (settings.find && target && isPlaying()) drawTargetBadge(now);
     drawRings(); drawFlies();
+    if (power) drawPowerBanner(now);
     if (storm) { if (storm.phase === 'rain') drawStormHud(now); drawStormCards(now); }
   }
 
@@ -1704,6 +1847,7 @@
     document.getElementById('tVoice').classList.toggle('off', !settings.voice);
     document.getElementById('tLevels').classList.toggle('off', !settings.levels);
     document.getElementById('tStorm').classList.toggle('off', !settings.storm);
+    document.getElementById('tPowers').classList.toggle('off', !settings.powers);
     document.getElementById('tBook').classList.toggle('off', !settings.book);
     document.querySelectorAll('[data-boss]').forEach(b => b.classList.toggle('on', +b.dataset.boss === settings.bossTaps));
   }
@@ -1715,6 +1859,7 @@
     queueWarm(); // the new mode's glyphs (and tinted bodies) get warmed
     target = null; newTarget();
   });
+  document.getElementById('tPowers').onclick = () => { settings.powers = !settings.powers; saveSettings(); syncPanel(); if (!settings.powers) { endPower(); bubbles.splice(0, bubbles.length, ...bubbles.filter(b => !b.power)); } else queueWarm(); };
   document.getElementById('tBook').onclick = () => { settings.book = !settings.book; saveSettings(); syncPanel(); bookBtn.hidden = !settings.book; };
   document.getElementById('tStorm').onclick = () => { settings.storm = !settings.storm; saveSettings(); syncPanel(); if (!settings.storm && storm) resetLevel(); };
   // a reset takes two taps so it can't happen by accident
@@ -1765,7 +1910,7 @@
   if (/[?&]debug/.test(location.search)) window.__bubblePop = () => ({ target: target && target.id, found, bubbles: bubbles.length,
     targets: bubbles.filter(b => target && b.item.id === target.id).map(b => ({ x: b.x, y: b.y })),
     sprites: cacheStats(), pts: bubbles.map(b => ({ x: b.x, y: b.y, r: b.r, gold: !!b.gold, rainbow: !!b.rainbow, power: b.power || null, leave: !!b.leave })),
-    stickers: stickers.size, book: bookOpen, power: null,
+    stickers: stickers.size, book: bookOpen, power: power ? power.def.id : null, powerLeft: power ? +(POWER_T - power.t).toFixed(1) : 0, powerBubbles: bubbles.filter(b => b.power).length,
     storm: { on: !!storm, phase: storm ? storm.phase : null, score: storm ? storm.score : 0, best, t: storm ? +(storm.rt).toFixed(2) : 0, nb: !!(storm && storm.nb), shown: storm ? storm.show : 0 },
     level: lv.level, phase: settings.levels ? lv.phase : 'play', pops: lv.pops, popsNeeded: popsNeeded(), levelLength: settings.levelLen, who, bossHits: boss ? boss.hits : 0, bossTaps: bossNeed(),
     look: lv.look, theme: THEMES[theme], stars: lv.stars, popCount, confetti: confetti.length, hint: !!boss && boss.idle >= 8, breakT: lv.t,
