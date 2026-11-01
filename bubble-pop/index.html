@@ -43,6 +43,9 @@
   .toggles button.off { opacity: .45; }
   .toggles button.on { border-color: #38c6f4; background: #e3f7ff; }
   .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
+  #whoLine { margin: 0 0 6px; font-weight: 800; font-size: 14px; opacity: 1; color: #2b2d5c; background: #fff0f8; border-radius: 12px; padding: 8px 10px; }
+  /* some settings only belong to one of the two modes */
+  body[data-who="little"] [data-only="big"], body[data-who="big"] [data-only="little"] { display: none !important; }
 </style>
 <link rel="stylesheet" href="../shared/grownup.css">
 </head>
@@ -56,6 +59,7 @@
   <div class="card">
     <h2>Grown-up settings</h2>
     <p>Press and hold the ⚙️ to get back here.</p>
+    <p id="whoLine"></p>
     <div class="label">What's in the bubbles?</div>
     <div class="modes">
       <button data-mode="animals">🐶 Animals</button>
@@ -78,9 +82,16 @@
     </div>
     <div class="label">Bubble speed</div>
     <div class="modes">
+      <button data-speed="0.4">🐌 Extra slow</button>
       <button data-speed="0.6">🐢 Slow</button>
       <button data-speed="1">🐇 Normal</button>
-      <button data-speed="1.7" style="grid-column: span 2">🚀 Super fast</button>
+      <button data-speed="1.7">🚀 Super fast</button>
+    </div>
+    <div class="label">Bubble size</div>
+    <div class="toggles">
+      <button data-size="1">Normal</button>
+      <button data-size="1.2">Bigger</button>
+      <button data-size="1.4">Biggest</button>
     </div>
     <div class="label">Levels</div>
     <div class="toggles">
@@ -139,11 +150,26 @@
     }
   }
 
-  // ---------- Settings (only settings are saved) ----------
+  // ---------- Settings (per mode) ----------
+  // The shared "Who's playing?" switch picks a mode, and each mode keeps its own settings, so a grown-up's tweaks
+  // survive switching. Only settings are saved here (the best score and the sticker book have their own keys, below).
   const KEY = 'bubblePop.kids.v1';
-  let settings = { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false, levels: true, bossTaps: 12 };
-  try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
-  const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
+  const DEFAULTS = {
+    little: { mode: 'animals', sound: true, voice: true, speed: 0.4, find: false, levels: false, bossTaps: 12, size: 1.2, skyShift: true },
+    big: { mode: 'animals', sound: true, voice: true, speed: 0.6, find: false, levels: true, bossTaps: 12, size: 1 },
+  };
+  const all = { little: { ...DEFAULTS.little }, big: { ...DEFAULTS.big } };
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY));
+    if (saved && typeof saved === 'object') {
+      if (saved.little || saved.big) { Object.assign(all.little, saved.little); Object.assign(all.big, saved.big); }
+      else Object.assign(all.big, saved); // the old flat settings were for everyone: they become Big kid's
+    }
+  } catch (e) {}
+  const saveSettings = () => { try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) {} };
+  let who = window.KidsGrownup && KidsGrownup.who() === 'little' ? 'little' : 'big';
+  let settings = all[who];
+  document.body.dataset.who = who;
 
   // ---------- Canvas ----------
   const cv = document.getElementById('c'), ctx = cv.getContext('2d');
@@ -230,7 +256,7 @@
   let popCount = 0;
 
   // Bubble size has a floor for small fingers and a ceiling so big screens get more bubbles, not giant ones
-  const baseR = () => Math.max(36, Math.min(80, unit() * 0.095));
+  const baseR = () => Math.max(36, Math.min(80, unit() * 0.095)) * (settings.size || 1);
   // about a fifth of the screen covered in bubbles, whatever its size
   const maxBubbles = () => Math.max(8, Math.min(18, Math.round((W * H * 0.22) / (Math.PI * baseR() ** 2))));
   // rise speed is a share of the screen height, so a trip takes the same time on a phone or a monitor
@@ -399,6 +425,23 @@
     if (settings.levels) setTheme(themeOf(lv.level)); else setTheme(0, true); // levels off is today's plain day sky
     if (bubbles.length < maxBubbles() * 0.5) streamIn();
   }
+
+  // the sky starts full
+  function fillSky() {
+    for (let i = 0, n = maxBubbles(); i < n; i++) spawnBubble(undefined, H * (0.1 + 0.9 * (i + Math.random()) / n), { giant: false });
+  }
+  // Who's playing changed (here or in another tab): swap to that mode's settings and start clean, with no stuck boss or break
+  function applyWho(w) {
+    w = w === 'little' ? 'little' : 'big';
+    if (w === who) return;
+    who = w; settings = all[w]; document.body.dataset.who = w;
+    resetLevel();
+    lv.level = 1; lv.stars = 0;
+    bubbles.length = 0; reveals.length = 0; particles.length = 0; confetti.length = 0;
+    buildSprites(true); // bubble size and content may differ
+    fillSky(); spawnT = 0; target = null; found = 0; newTarget(); syncPanel();
+  }
+  addEventListener('kidswho', e => applyWho(e.detail));
 
   // ---- the boss ----
   const bossR = () => unit() * 0.225; // about 0.45 of the short side across
@@ -1012,7 +1055,7 @@
     warmClouds = CLOUDS.map((c, i) => SUNSET_C.includes(i) ? paintCloud(unit() * 0.13 * c.s, '#fff1e8') : null);
     raySprite = paintRays();
     buildBossSprite(); card = null; // sized from the screen, so they follow a resize or rotation
-    const rm = Math.ceil(baseR() * 1.25 * 1.04) + 1, sm = Math.min(76, Math.round(baseR() * 1.75));
+    const rm = Math.ceil(baseR() * 1.25 * 1.04) + 1, sm = Math.min(settings.size > 1 ? 84 : 76, Math.round(baseR() * 1.75));
     if (!keep || rm !== RM || sm !== SM || DPR !== spriteDPR) {
       bodySprites.clear(); itemSprites.clear(); urgent.clear(); warm.length = 0; queued.clear(); job = null; layers = null;
     }
@@ -1212,6 +1255,8 @@
     document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === settings.mode));
     document.querySelectorAll('[data-find]').forEach(b => b.classList.toggle('on', +b.dataset.find === +settings.find));
     document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('on', +b.dataset.speed === settings.speed));
+    document.querySelectorAll('[data-size]').forEach(b => b.classList.toggle('on', +b.dataset.size === settings.size));
+    document.getElementById('whoLine').textContent = who === 'little' ? '🧸 These are the Little settings (toddler). Switch who is playing below.' : '🚀 These are the Big kid settings. Switch who is playing below.';
     document.getElementById('tSound').classList.toggle('off', !settings.sound);
     document.getElementById('tVoice').classList.toggle('off', !settings.voice);
     document.getElementById('tLevels').classList.toggle('off', !settings.levels);
@@ -1224,6 +1269,12 @@
     for (const bb of bubbles) bb.item = makeItem(settings.mode); // switch what's on screen right away
     queueWarm(); // the new mode's glyphs (and tinted bodies) get warmed
     target = null; newTarget();
+  });
+  document.querySelectorAll('[data-size]').forEach(b => b.onclick = () => {
+    const k = +b.dataset.size / (settings.size || 1);
+    settings.size = +b.dataset.size; saveSettings(); syncPanel();
+    for (const bb of bubbles) bb.r *= k; // what's on screen grows or shrinks right away
+    buildSprites(true);
   });
   document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { settings.speed = +b.dataset.speed; saveSettings(); syncPanel(); });
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
@@ -1247,7 +1298,7 @@
   // Nothing waits on this: the game plays at once with the fallback font and swaps in a moment later.
   if (document.fonts && document.fonts.load) document.fonts.load('900 64px "Kids Rounded"').then(() => buildSprites(), () => {});
   // start with the sky already full
-  for (let i = 0, n = maxBubbles(); i < n; i++) spawnBubble(undefined, H * (0.1 + 0.9 * (i + Math.random()) / n), { giant: false });
+  fillSky();
   newTarget();
   requestAnimationFrame(loop);
   // ?debug: a read-only snapshot for automated testing
