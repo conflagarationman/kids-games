@@ -1,14 +1,15 @@
 // Grown-up play-time timer, shared by every page. One clock across all the games (localStorage, key below).
 // API: KidsGrownup.register({ setVolume(v), pause() })  - a game calls this once;
-//      KidsGrownup.mountPanel(container)                - renders the "Play time" controls (any [data-kg-panel] is mounted automatically).
+//      KidsGrownup.mountPanel(container)                - renders the "Who's playing?" and "Play time" controls (any [data-kg-panel] is mounted automatically).
+//      KidsGrownup.who() -> 'little' | 'big'            - who's playing, shared by every game; a 'kidswho' event fires on window when it changes.
 (() => {
   if (window.KidsGrownup) return;
 
   const KEY = 'kidsGames.grownup.v1';
   const DEBUG = /[?&]debug/.test(location.search), FAST = DEBUG && /[?&]fast/.test(location.search); // fast: a minute lasts a second
-  const MIN = 60000, WIND = 2 * MIN, AWAY = 6 * 3600 * 1000, TICK = 500, SAVE_MS = 5000, MAX_STEP = 1500;
+  const MIN = 60000, AWAY = 6 * 3600 * 1000, TICK = 500, SAVE_MS = 5000, MAX_STEP = 1500;
   const DIM_MAX = 0.25, VOL_MIN = 0.6;
-  const PRESETS = [10, 15, 20, 30, 45, 60], SHOWS = ['ring', 'ring+minutes', 'hidden'];
+  const PRESETS = [5, 10, 15, 20, 30, 45, 60], SHOWS = ['ring', 'ring+minutes', 'hidden'];
   const SHOW_LABELS = { ring: 'Ring', 'ring+minutes': 'Ring + minutes', hidden: 'Hidden' };
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
@@ -20,14 +21,16 @@
   function adopt(o) {
     if (!o || typeof o !== 'object') return false;
     const lim = Math.round(+o.limit);
-    st.limit = lim >= 5 && lim <= 120 ? lim : 0;
+    st.limit = lim >= 1 && lim <= 120 ? lim : 0;
     st.show = SHOWS.includes(o.show) ? o.show : 'ring';
     st.remainingMs = clamp(+o.remainingMs || 0, 0, 24 * 3600 * 1000);
     st.lastTick = +o.lastTick || 0;
     return true;
   }
-  const stateFor = () => !st.limit ? 'playing' : st.remainingMs <= 0 ? 'goodnight' : st.remainingMs <= WIND ? 'winding' : 'playing';
-  const windP = () => st.state === 'goodnight' ? 1 : st.state === 'winding' ? 1 - st.remainingMs / WIND : 0;
+  // the wind-down is the last 2 minutes, or the last 40% of a short session, so a 2-minute limit isn't dim from the start
+  const windMs = () => Math.min(2 * MIN, st.limit * MIN * 0.4);
+  const stateFor = () => !st.limit ? 'playing' : st.remainingMs <= 0 ? 'goodnight' : st.remainingMs <= windMs() ? 'winding' : 'playing';
+  const windP = () => st.state === 'goodnight' ? 1 : st.state === 'winding' ? 1 - st.remainingMs / windMs() : 0;
   const minutesLeft = () => Math.ceil(st.remainingMs / MIN);
   function newSession() { st.remainingMs = st.limit * MIN; st.lastTick = Date.now(); }
 
@@ -252,24 +255,31 @@
 
   // ---------- "Play time" controls (shared by the games' panels and the home page) ----------
   const panels = new Set();
+  // 1 to 4 minutes in 1-minute steps, then 5-minute steps up to 120
   function setLimit(n) {
-    n = n ? clamp(Math.round(n / 5) * 5, 5, 120) : 0;
+    n = !n ? 0 : n < 5 ? clamp(Math.round(n), 1, 4) : clamp(Math.round(n / 5) * 5, 5, 120);
     if (n === st.limit) return;
     st.limit = n; newSession(); update(); save();
   }
   function mountPanel(box) {
     if (!box || box.dataset.kgMounted) return;
     box.dataset.kgMounted = '1'; box.classList.add('kg-sec'); panels.add(box);
-    box.innerHTML = `<div class="kg-label">⏰ Play time</div><div class="kg-left"></div>
+    box.innerHTML = `<div class="kg-label">Who's playing?</div>
+      <div class="kg-chips kg-who"><button type="button" class="kg-btn" data-who="little">🧸 Little (1–2)</button><button type="button" class="kg-btn" data-who="big">🚀 Big kid (3–5)</button></div>
+      <div class="kg-label">⏰ Play time</div><div class="kg-left"></div>
       <div class="kg-chips"><button type="button" class="kg-btn" data-lim="0">Off</button>${PRESETS.map(m => `<button type="button" class="kg-btn" data-lim="${m}">${m}</button>`).join('')}</div>
-      <div class="kg-step"><button type="button" class="kg-btn" data-step="-5" aria-label="5 minutes less">−</button><span class="kg-len"></span><button type="button" class="kg-btn" data-step="5" aria-label="5 minutes more">+</button></div>
+      <div class="kg-step"><button type="button" class="kg-btn" data-step="-1" aria-label="Less time">−</button><span class="kg-len"></span><button type="button" class="kg-btn" data-step="1" aria-label="More time">+</button></div>
       <div class="kg-label">Countdown</div>
       <div class="kg-chips kg-show">${SHOWS.map(s => `<button type="button" class="kg-btn" data-show="${s}">${SHOW_LABELS[s]}</button>`).join('')}</div>
       <button type="button" class="kg-btn wide" data-new>🌙 Start a new session now</button>`;
     box.addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.lim != null) setLimit(+b.dataset.lim);
-      else if (b.dataset.step) setLimit(st.limit ? st.limit + +b.dataset.step : (+b.dataset.step > 0 ? 5 : 0));
+      else if (b.dataset.step) {
+        const up = +b.dataset.step > 0, L = st.limit;
+        setLimit(!L ? (up ? 5 : 0) : up ? (L < 5 ? L + 1 : L + 5) : (L <= 5 ? Math.max(1, L - 1) : L - 5));
+      }
+      else if (b.dataset.who) setWho(b.dataset.who);
       else if (b.dataset.show) { st.show = b.dataset.show; update(); save(); }
       else if (b.hasAttribute('data-new')) { newSession(); update(); save(); }
     });
@@ -280,11 +290,25 @@
       if (!box.isConnected) { panels.delete(box); continue; }
       box.querySelectorAll('[data-lim]').forEach(b => b.classList.toggle('on', +b.dataset.lim === st.limit));
       box.querySelectorAll('[data-show]').forEach(b => b.classList.toggle('on', b.dataset.show === st.show));
+      box.querySelectorAll('[data-who]').forEach(b => b.classList.toggle('on', b.dataset.who === who));
       box.querySelector('.kg-len').textContent = st.limit ? st.limit + ' min' : 'Off';
       box.querySelector('.kg-left').textContent = !st.limit ? 'No limit. Play as long as you like.'
         : st.state === 'goodnight' ? "Time's up." : minutesLeft() + ' min left';
     }
   }
+
+  // ---------- Who's playing (shared by every game; each game picks its own defaults for each) ----------
+  const WHO_KEY = 'kidsGames.profile.v1';
+  const readWho = () => { try { const o = JSON.parse(localStorage.getItem(WHO_KEY)); return o && o.who === 'little' ? 'little' : 'big'; } catch (e) { return 'big'; } };
+  let who = readWho();
+  function setWho(w) {
+    w = w === 'little' ? 'little' : 'big';
+    if (w === who) return;
+    who = w;
+    try { localStorage.setItem(WHO_KEY, JSON.stringify({ who })); } catch (e) {}
+    syncPanels(); dispatchEvent(new CustomEvent('kidswho', { detail: who }));
+  }
+  addEventListener('storage', e => { if (e.key === WHO_KEY) { const w = readWho(); if (w !== who) { who = w; syncPanels(); dispatchEvent(new CustomEvent('kidswho', { detail: who })); } } });
 
   // ---------- Keep the game behind the goodnight scene quiet ----------
   ['pointerdown', 'pointermove', 'click', 'dblclick', 'keydown'].forEach(type => addEventListener(type, e => {
@@ -303,8 +327,8 @@
     document.querySelectorAll('[data-kg-panel]').forEach(mountPanel);
     setInterval(tick, TICK);
   }
-  window.KidsGrownup = { register, mountPanel };
+  window.KidsGrownup = { register, mountPanel, who: () => who };
   if (DEBUG) window.__grownup = () => ({ limit: st.limit, show: st.show, remainingMs: st.remainingMs, lastTick: st.lastTick, state: st.state,
-    windProgress: windP(), volume: sentV, minutesLeft: minutesLeft(), fast: FAST, hook: !!hook, night: nightOn, lullaby: lulling });
+    windProgress: windP(), windMs: windMs(), who, volume: sentV, minutesLeft: minutesLeft(), fast: FAST, hook: !!hook, night: nightOn, lullaby: lulling });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

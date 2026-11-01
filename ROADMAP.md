@@ -15,12 +15,12 @@ Sessions can only test in a desktop preview browser with simulated touches and n
 
 Roughly in priority order. None are committed to. Check with the owner before starting one.
 
-1. **Bubble Pop: a roguelike Adventure mode with a skill tree** (the owner's goal; a third mode next to Little and Big kid). Shaped for a 4-year-old and the "nothing to fail" rule:
-   - **A run is a journey, not a life.** About 8 to 10 levels on a little map, ending in a finale boss. A run always finishes with a celebration; there is no death and no game over.
-   - **Pick a power between levels:** 2 or 3 big picture cards, all good choices, with effects you can see straight away (magnet finger pulls nearby bubbles in, bigger pop blasts, slow-motion bubbles, a bubble buddy that pops on its own, a rainbow chain). Powers stack for the rest of the run.
-   - **Skill tree between runs:** stars earned in runs unlock permanent nodes, drawn as a tree of big sticker icons. Nodes add powers to the card pool and unlock bubble skins, sky themes and bosses. Nothing is ever lost, and a grown-up can reset it.
-   - **Needs saved progress** (stars, unlocked nodes, best scores), a deliberate exception to "only settings are saved". Keep it in its own key, separate from settings.
-   - **Build order:** (a) powers as occasional pickups in normal Big kid play, which tests what's fun; (b) the run structure with power picks; (c) the skill tree; (d) more bosses and map art.
+1. **Bubble Pop: a roguelike Adventure mode with a skill tree** (the owner's goal; a third mode next to Little and Big kid). A real roguelike: runs can be lost, which is the deliberate exception to "nothing to fail" (the owner's call).
+   - **A run:** about 8 to 10 levels on a little map with a finale boss. Something to lose: for example a few hearts (bubbles that reach the top, or a boss attack you don't pop away in time, cost one), and the run ends at zero. A lost run still gives the stars you earned, and the end screen says how far you got, never that you failed.
+   - **Pick a power between levels:** 2 or 3 big picture cards with effects you can see straight away (magnet finger pulls nearby bubbles in, bigger pop blasts, slow-motion bubbles, a bubble buddy that pops on its own, a rainbow chain, an extra heart). Powers stack for the rest of the run.
+   - **Skill tree between runs:** stars earned in runs unlock permanent nodes, drawn as a tree of big sticker icons. Nodes add powers to the card pool, add a starting heart, and unlock bubble skins, sky themes and bosses. A grown-up can reset it.
+   - **Needs saved progress** (stars, unlocked nodes, best run), a deliberate exception to "only settings are saved". Keep it in its own key, separate from settings, like the Big kid best score.
+   - **Build order:** (a) powers as occasional pickups in normal Big kid play (being built now), which tests what's fun; (b) the run structure with hearts and power picks; (c) the skill tree; (d) more bosses and map art.
 2. **Web Hero: rescue mini-levels.** Web a falling kitten or ice cream before it lands, for variety between tower levels.
 3. **Web Hero: choice of hero,** a few original color and suit variants.
 4. **Web Hero: fuller Big levels on portrait iPads.** The narrow screen only fits about 2 vehicles; stack more vertically when tall.

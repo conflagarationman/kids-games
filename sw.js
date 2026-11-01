@@ -2,7 +2,7 @@
 // refresh in the background when online. Each game has its own sw.js with a narrower scope, which takes over
 // inside that game's folder; the home page registers all of them, so one visit online makes every game work offline.
 // All the games share one site, so only clear out the home page's own old caches.
-const CACHE = 'home-v1';
+const CACHE = 'home-v2';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png',
   './shared/KidsRounded.woff2', './shared/grownup.js', './shared/grownup.css',
   './bubble-pop/cover.svg', './bubble-pop/icon-192.png', './magic-paint/cover.svg', './magic-paint/icon-192.png',
