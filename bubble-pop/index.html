@@ -23,6 +23,7 @@
   .sky { position: fixed; inset: 0; pointer-events: none; }
   #skyA { background: linear-gradient(180deg, #8fd8ff 0%, #c9b8ff 60%, #ffc6e5 100%); }
   #skyB { opacity: 0; }
+  #skies { position: fixed; inset: 0; pointer-events: none; transition: filter .9s linear; } /* Little mode's sky shift turns this layer's hue */
   #tint { background: rgba(60,120,255,.17); opacity: 0; transition: opacity .8s ease; } /* slow-mo's gentle blue */
 
   /* Parent button: small, faded, needs a long press so little fingers don't open it */
@@ -70,7 +71,7 @@
 <link rel="stylesheet" href="../shared/grownup.css">
 </head>
 <body>
-<div class="sky" id="skyA"></div><div class="sky" id="skyB"></div><div class="sky" id="tint"></div>
+<div id="skies"><div class="sky" id="skyA"></div><div class="sky" id="skyB"></div></div><div class="sky" id="tint"></div>
 <canvas id="c"></canvas>
 
 <button id="bookBtn" aria-label="Sticker book">📖</button>
@@ -407,6 +408,7 @@
     if (storm) { /* storm pops score in stormScore */ }
     else if (settings.levels) { if (live && (!settings.find || isTarget)) levelPop(); } // the boss pop is the celebration
     else if (!settings.find && popCount % 12 === 0) celebrate();
+    if (skyShiftOn()) skyKick();
     if (b.power && live) startPower(b.power);
     if (power && power.def.onPop && !noChain && live) power.def.onPop(b);
     // keep the screen lively: a fresh bubble arrives soon after each pop
@@ -463,6 +465,22 @@
     fadeTimer = setTimeout(() => { skyA.style.background = SKY[i]; skyB.style.transition = 'none'; skyB.style.opacity = '0'; }, 1050);
   }
 
+  // ---- Little's sky shift: each pop nudges the sky's colors along a soft pastel cycle, so the toddler sees cause and effect ----
+  // A CSS hue-rotate on the sky layers (no canvas cost), eased by a transition; it drifts back slowly when nothing is popped.
+  const skiesEl = document.getElementById('skies');
+  let skyHue = 0, skyIdle = 0, skyApplied = 0, skyTimer = 0;
+  const skyShiftOn = () => who === 'little' && settings.skyShift;
+  function skyKick() { skyHue = Math.min(170, skyHue + 14); skyIdle = 0; }
+  function updateSky(dt) {
+    skyIdle += dt;
+    if (skyIdle > 3 && skyHue > 0) skyHue = Math.max(0, skyHue - 5 * dt);
+    if ((skyTimer -= dt) > 0) return;
+    skyTimer = 0.25;
+    const h = Math.round(skyHue / 2) * 2;
+    if (h !== skyApplied) { skyApplied = h; skiesEl.style.filter = h ? `hue-rotate(${h}deg)` : ''; }
+  }
+  function resetSky() { skyHue = skyApplied = 0; skiesEl.style.filter = ''; }
+
   function levelPop() {
     if (lv.phase !== 'play') return; // a power's chain can fill the level in the middle of a pop
     lv.pops++; lv.pipT = 0;
@@ -496,7 +514,7 @@
     w = w === 'little' ? 'little' : 'big';
     if (w === who) return;
     who = w; settings = all[w]; document.body.dataset.who = w;
-    closeBook(); flies.length = 0; bookBtn.hidden = !settings.book;
+    closeBook(); flies.length = 0; resetSky(); bookBtn.hidden = !settings.book;
     resetLevel();
     lv.level = 1; lv.stars = 0;
     bubbles.length = 0; reveals.length = 0; particles.length = 0; confetti.length = 0;
@@ -1715,7 +1733,7 @@
     const sp = settings.speed;
     updateLevels(dt, asleep ? 0 : dt); // bedtime freezes the boss and break clocks
     updateStorm(dt, asleep ? 0 : dt);
-    updateFlies(dt); updatePower(dt, asleep ? 0 : dt);
+    updateSky(dt); updateFlies(dt); updatePower(dt, asleep ? 0 : dt);
     // nobody's found it for a while: ask again and shimmer the right ones
     if (settings.find && target && isPlaying() && performance.now() - askedAt > 12000) { hintGlow = 1; ask(); }
     spawnT -= dt * slow;
@@ -1910,7 +1928,7 @@
   if (/[?&]debug/.test(location.search)) window.__bubblePop = () => ({ target: target && target.id, found, bubbles: bubbles.length,
     targets: bubbles.filter(b => target && b.item.id === target.id).map(b => ({ x: b.x, y: b.y })),
     sprites: cacheStats(), pts: bubbles.map(b => ({ x: b.x, y: b.y, r: b.r, gold: !!b.gold, rainbow: !!b.rainbow, power: b.power || null, leave: !!b.leave })),
-    stickers: stickers.size, book: bookOpen, power: power ? power.def.id : null, powerLeft: power ? +(POWER_T - power.t).toFixed(1) : 0, powerBubbles: bubbles.filter(b => b.power).length,
+    skyHue: Math.round(skyHue), stickers: stickers.size, book: bookOpen, power: power ? power.def.id : null, powerLeft: power ? +(POWER_T - power.t).toFixed(1) : 0, powerBubbles: bubbles.filter(b => b.power).length,
     storm: { on: !!storm, phase: storm ? storm.phase : null, score: storm ? storm.score : 0, best, t: storm ? +(storm.rt).toFixed(2) : 0, nb: !!(storm && storm.nb), shown: storm ? storm.show : 0 },
     level: lv.level, phase: settings.levels ? lv.phase : 'play', pops: lv.pops, popsNeeded: popsNeeded(), levelLength: settings.levelLen, who, bossHits: boss ? boss.hits : 0, bossTaps: bossNeed(),
     look: lv.look, theme: THEMES[theme], stars: lv.stars, popCount, confetti: confetti.length, hint: !!boss && boss.idle >= 8, breakT: lv.t,
