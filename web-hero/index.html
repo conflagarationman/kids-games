@@ -33,11 +33,12 @@
   .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
   .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
   .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .modes button, .toggles button, .done { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; }
+  .modes button, .toggles button, .done, .home { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; }
   .modes button.on { border-color: #1fb5a8; background: #dcf8f4; }
   .toggles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .toggles button.off { opacity: .45; }
   .done { width: 100%; margin-top: 16px; background: #ff8a1f; color: #fff; }
+  .home { display: block; box-sizing: border-box; width: 100%; margin-top: 10px; text-align: center; text-decoration: none; }
 </style>
 <link rel="stylesheet" href="../shared/grownup.css">
 </head>
@@ -69,6 +70,7 @@
       <button id="tNext">⏭️ Next level</button>
     </div>
     <div data-kg-panel></div>
+    <a class="home" id="home" href="../">🏠 All games</a>
     <button class="done" id="done">Let's play!</button>
   </div>
 </div>
@@ -537,7 +539,7 @@
   let aim = null, lastAct = 0;
   cv.addEventListener('pointerdown', e => {
     e.preventDefault(); audio(); lastAct = performance.now();
-    if (aim) return;
+    // newest finger wins: a resting palm must never block a shot (the old pointer's pointerup then does nothing)
     aim = { id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };
     try { cv.setPointerCapture(e.pointerId); } catch (err) {}
   });
