@@ -32,7 +32,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Big targets.** Anything a kid touches is at least 44px, with generous hit zones.
 - **Keep the bottom edge clear.** Kids rest their wrists along the bottom edge of tablets, so no controls go there.
 - **No narration over play.** Kids go passive when narrated at. Bubble Pop's spoken names are the deliberate exception and have a voice toggle.
-- **Grown-up settings hide behind a press-and-hold.** The ⚙️ button top-right opens a panel after a 1.5s hold (a ring fills). Every game has it; copy the markup, CSS and JS from an existing game.
+- **Grown-up settings hide behind a press-and-hold.** The ⚙️ button top-right opens a panel after a 1.5s hold (a ring fills). Every game has it; copy the markup, CSS and JS from an existing game. It also holds the way home: a `<a class="home" href="../">🏠 All games</a>` above the done button (no game links home from the play screen). Not just "🏠" alone, because Magic Paint's House page uses that icon.
 - **Make blank states inviting.** An idle screen shows a hint (Magic Paint's ghost 👆, Web Hero's pull hint).
 - **No trademarked characters.** The site is public. No Spider-Man, Paw Patrol and so on, by name, logo or look. Make original characters (Web Hero's masked kid is original on purpose).
 
@@ -55,6 +55,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
   | Magic Paint | `magicPaint.kids.v1` |
   | Little Band | `littleBand.kids.v2` |
   | Web Hero | `webHero.kids.v1` |
+  | Magic Paint paintings | IndexedDB `magicPaint.paintings.v1`, store `pages` (PNG blobs per page, progress: the third exception to "only settings are saved") |
 
   Bump the key's version only if old saved values would break the game. New settings just get a default in the `settings` object.
 - **Color emoji on canvas:** set `ctx.fillStyle = '#000'` right before any emoji `fillText`. Chrome applies the fill's transparency to color emoji, and this once made icons look washed out.
@@ -62,7 +63,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Sound limiter:** every game puts a `DynamicsCompressorNode` (threshold -12 dB, knee 6, ratio 12, attack 0.003, release 0.25) between its master gain and `actx.destination`, so piles of sounds don't distort on tablet speakers.
 - **Offline (`sw.js`):** stale-while-revalidate over a fixed `FILES` list.
   - **Prefix cleanup:** all games share one origin, so `activate` may delete only caches starting with that game's prefix (`k.startsWith('<game>-')`). Never delete other games' caches.
-  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v12`, `magic-paint-v10`, `little-band-v9`, `web-hero-v7`. Bumping gets installed copies to update.
+  - **Bump `CACHE` on every change.** Current versions: `bubble-pop-v13`, `magic-paint-v11`, `little-band-v10`, `web-hero-v8`. Bumping gets installed copies to update.
   - **Home page:** the root `sw.js` (cache `home-v2`, prefix `home-`) caches the home page, its covers and tile icons, `shared/` and the unlisted `verses/` page. The home page also registers every game's own worker (`register('<game>/sw.js', { scope: '<game>/' })`), so one visit to the home page online makes every game work offline. Each game's narrower scope wins inside its folder. Bump `home-v*` whenever anything the root `FILES` lists changes.
   - **New files:** add any file the game needs to `FILES`. Every game also lists `../shared/KidsRounded.woff2`, `../shared/grownup.js` and `../shared/grownup.css` (same origin, so the paths work).
 - **Look:** soft pastel gradients and white-outlined shapes. Fonts are "Trebuchet MS" for UI and "Kids Rounded" (bundled Nunito ExtraBold, then "Arial Rounded MT Bold") for big glyphs; ink is `#2b2d5c`; the bright palette is `#ff3b3b #ff9a1f #f5c800 #22b84a #2f7bff #a04dff #ff4fb0`.
@@ -137,7 +138,8 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Coloring pages** (`settings.page`, `PAGES`): line art drawn in a -1..1 box with helpers `c e p l a` onto an `outline` canvas that sits on top of the paint. `wall` marks line pixels.
 - **Tap to fill:** when a page is drawn, `labelRegions()` labels every open area once with bounding boxes, so a tap just looks up its region (a few ms, even full-screen on a 12.9" iPad). The fill goes into an offscreen canvas, which pours in with a growing clip circle, then bakes into the paint. A tap on a page never stamps: a tap on a line fills the nearest open spot (searched out past the line width, `lineW`), and if there is none it just sparkles.
 - **Page placement:** `pageBox()` keeps clear of the color buttons. On resize the page keeps its box so the paint still lines up, unless it no longer fits (then the page is re-placed and the paint cleared).
-- **Page memory:** each page (and blank paper) keeps its own painting. `leavePage()` snapshots the paint to an in-memory PNG blob, and `restorePage()` brings it back if the page box still matches. Not saved across reloads. Clear clears only the current page.
+- **Page memory:** each page (and blank paper) keeps its own painting. `leavePage()` snapshots the paint to an in-memory PNG blob, and `restorePage()` brings it back if the page box still matches. Clear clears only the current page.
+- **Saved paintings** (IndexedDB `magicPaint.paintings.v1`, store `pages`, keyPath `name`; a deliberate exception to "only settings are saved"): each row is `{ name ('' = blank paper), box, w, h, blobs[] }`, PNG blobs only and no extra canvases. `leavePage()` and a hidden or closing page (`visibilitychange` and `pagehide`, via `persistCurrent()`) write rows through `keep()`; `drop()` (Clear, a page that moved, or an emptied page) deletes the stored copy too. On load `store.all()` fills `saved` for `restorePage()`, so the current page returns at once and the others when switched to; a row is dropped when `sameBox` fails or the canvas size (`w`, `h`) changed. `gens` stops an encode still in flight from reviving a cleared painting. Every IndexedDB call fails silently (private mode, quota), and the game works exactly as before without it. Only a hidden page is certain to finish encoding; a bare `pagehide` may not.
 - **Stickers:** stamps use the shared sticker look from a small least-recently-used cache (about 14MB). `?debug` exposes memory per cache through `window.__magicPaint()`.
 - **Picture button:** the 🖼️ button in `#palette` cycles `PAGE_ORDER`. On big screens (`bigStrip()`: shortest side at least 700px, with the color buttons shown) it hides, and `#pages` shows every page as a tile down the right side instead. Thumbnails are drawn once with `drawLines()`, `pageBox()` keeps clear of the strip, and tapping the current page's tile does nothing so it can't wipe the painting.
 
@@ -156,6 +158,7 @@ Games: `bubble-pop/`, `magic-paint/`, `little-band/`, `web-hero/` (web-hero also
 - **Built by:** a separate Sonnet session from a written plan.
 - **Hero:** original masked kid in a teal suit with a yellow chest star, orange domino mask and yellow cape.
 - **Shooting:** pull anywhere to slingshot (a stretchy strand plus 25 aim dots), or tap empty sky to auto-throw a lobbed arc there.
+- **One finger never blocks another:** a new `pointerdown` takes over the aim (newest finger wins), so a thumb or palm resting on the screen can't stop a shot; the old pointer's later `pointerup` does nothing because `endAim` checks `pointerId`.
 - **Sticky web** (`settings.tap = 'yank'`, the default): tapping a crate or vehicle (`Query.point`) adds a Matter `Constraint` from the wrist to that spot. The web shoots out for 0.12s, reels in hard, and lets go at 0.75s. At most 2 at once.
 - **Targets:** hand-drawn vehicles on Matter bodies, on crate and girder towers.
 - **Physics:** Matter.js `Engine.create({ enableSleeping: true })`, stepped at a fixed 1/60s. No Matter.Runner or Matter.Render: everything is drawn by hand.
