@@ -301,7 +301,7 @@
   }
   if ('speechSynthesis' in window) { chooseVoice(); speechSynthesis.onvoiceschanged = chooseVoice; }
   function say(text) {
-    if (!settings.voice || asleep || !('speechSynthesis' in window)) return;
+    if (!settings.voice || asleep || !('speechSynthesis' in window) || (window.KidsGrownup && !KidsGrownup.sound())) return;
     speechSynthesis.cancel(); // always say the newest thing, never a backlog
     const u = new SpeechSynthesisUtterance(text);
     if (voice) u.voice = voice;
