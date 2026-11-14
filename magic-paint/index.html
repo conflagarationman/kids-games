@@ -47,11 +47,12 @@
   .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
   .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
   .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .modes button, .toggles button, .done { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; }
+  .modes button, .toggles button, .done, .home { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; }
   .modes button.on { border-color: #38c6f4; background: #e3f7ff; }
   .toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .toggles button.off { opacity: .45; }
   .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
+  .home { display: block; box-sizing: border-box; width: 100%; margin-top: 10px; text-align: center; text-decoration: none; }
 </style>
 <link rel="stylesheet" href="../shared/grownup.css">
 </head>
@@ -131,6 +132,7 @@
       <button id="tFull" style="grid-column: span 3">⛶ Full screen</button>
     </div>
     <div data-kg-panel></div>
+    <a class="home" id="home" href="../">🏠 All games</a>
     <button class="done" id="done">Let's paint!</button>
   </div>
 </div>
@@ -529,11 +531,36 @@
     }
     labels = lab; boxes = bb; runs = sorted; runAt = at;
   }
-  // ---------- Each page keeps its own painting (in memory only) ----------
+  // ---------- Each page keeps its own painting (in memory, mirrored to IndexedDB) ----------
   // Leaving a page snapshots the paint layer to a small PNG blob (full-size canvases per page would be too much memory on a big iPad).
   // An entry is { box, blobs: [Promise<Blob>] }; toBlob copies the bitmap right away, so clearing straight after is safe, and
   // a promise lets a quick switch back wait for the encode instead of finding nothing.
   const saved = new Map(); // page name ('' = blank paper) -> entry
+  // Paintings also survive a reload or iOS evicting the page, in IndexedDB. This is progress, a deliberate exception to "only settings are saved".
+  // PNG blobs only, and every call fails silently (private mode, quota): without it the game works exactly as before.
+  const store = (() => {
+    let dbp = null;
+    const open = () => dbp || (dbp = new Promise((res, rej) => {
+      try {
+        const r = indexedDB.open('magicPaint.paintings.v1', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('pages', { keyPath: 'name' });
+        r.onsuccess = () => { r.result.onversionchange = () => r.result.close(); res(r.result); }; r.onerror = r.onblocked = () => rej(r.error);
+      } catch (err) { rej(err); }
+    }));
+    const run = (mode, f) => open().then(db => new Promise((res, rej) => {
+      const tx = db.transaction('pages', mode), out = f(tx.objectStore('pages'));
+      tx.oncomplete = () => res(out.result); tx.onerror = tx.onabort = () => rej(tx.error);
+    })).catch(() => null);
+    return { put: v => run('readwrite', s => s.put(v)), del: name => run('readwrite', s => s.delete(name)), all: () => run('readonly', s => s.getAll()) };
+  })();
+  const gens = new Map(); // page name -> bumped by every clear, so an encode still in flight can't bring a cleared painting back
+  const gen = k => gens.get(k) || 0;
+  let loaded = false; // the stored paintings have been read (until then a blank page must not delete its stored copy)
+  function keep(key, e) { // store an entry once its PNGs are encoded; w and h guard against a different canvas size next visit
+    const g = gen(key);
+    Promise.all(e.blobs).then(bs => { if (g === gen(key) && bs.every(Boolean)) store.put({ name: key, box: e.box, w: paint.width, h: paint.height, blobs: bs }); }).catch(() => {});
+  }
+  function drop(key) { gens.set(key, gen(key) + 1); saved.delete(key); store.del(key); }
   let dirty = false, visits = 0, restoring = null; // dirty: the paint layer has something on it; restoring: name of the page whose snapshot is still loading, or null
   const sameBox = (a, b) => !a && !b || a && b && Math.abs(a.cx - b.cx) < 0.01 && Math.abs(a.cy - b.cy) < 0.01 && Math.abs(a.S - b.S) < 0.01;
   const boxOf = () => page ? { cx: page.cx, cy: page.cy, S: page.S } : null;
@@ -547,17 +574,27 @@
     const key = settings.page, e = saved.get(key);
     if (restoring === key) {
       // the page's old snapshot hasn't been drawn back yet: keep it, and add anything painted since as a layer on top
-      if (dirty) { bakeAll(); e.blobs.push(new Promise(res => paint.toBlob(res, 'image/png'))); }
+      if (dirty) { bakeAll(); e.blobs.push(new Promise(res => paint.toBlob(res, 'image/png'))); keep(key, e); }
       return;
     }
-    if (!dirty) { saved.delete(key); return; }
+    if (!dirty) { if (loaded) drop(key); else saved.delete(key); return; }
     bakeAll();
-    saved.set(key, { box: boxOf(), blobs: [new Promise(res => paint.toBlob(res, 'image/png'))] });
+    const ne = { box: boxOf(), blobs: [new Promise(res => paint.toBlob(res, 'image/png'))] };
+    saved.set(key, ne); keep(key, ne);
   }
+  // the page is going away (hidden, closed, or evicted): store the painting on screen without changing any state
+  function persistCurrent() {
+    const key = settings.page, e = saved.get(key), snap = () => new Promise(res => paint.toBlob(res, 'image/png'));
+    if (restoring === key && e) { if (dirty) { bakeAll(); keep(key, { box: e.box, blobs: [...e.blobs, snap()] }); } else keep(key, e); return; }
+    if (dirty) { bakeAll(); keep(key, { box: boxOf(), blobs: [snap()] }); }
+    else if (loaded) store.del(key); // nothing painted (cleared, or the page moved): don't keep an old copy
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) persistCurrent(); });
+  addEventListener('pagehide', persistCurrent);
   function restorePage() {
     const key = settings.page, e = saved.get(key);
     if (!e) return;
-    if (!sameBox(e.box, boxOf())) { saved.delete(key); return; } // the screen changed shape and the page moved: that painting no longer lines up
+    if (!sameBox(e.box, boxOf())) { drop(key); return; } // the screen changed shape and the page moved: that painting no longer lines up
     const visit = visits; restoring = key;
     Promise.all(e.blobs).then(bs => Promise.all(bs.filter(Boolean).map(b => createImageBitmap(b)))).then(bmps => {
       // the kid moved on to another page meanwhile: leave the snapshot saved for next time
@@ -857,7 +894,7 @@
   addEventListener('resize', syncPages);
   syncPalette();
   document.getElementById('tSound').onclick = () => { settings.sound = !settings.sound; saveSettings(); syncPanel(); };
-  document.getElementById('tClear').onclick = () => { clearPaint(); saved.delete(settings.page); restoring = null; whooshSound(); blank = true; idle = 0; }; // this page only
+  document.getElementById('tClear').onclick = () => { clearPaint(); drop(settings.page); restoring = null; whooshSound(); blank = true; idle = 0; }; // this page only
   document.getElementById('tSave').onclick = () => {
     // flatten onto the paper color so the saved picture looks like the screen
     const out = document.createElement('canvas'); out.width = paint.width; out.height = paint.height;
@@ -895,6 +932,15 @@
   resize();
   if (settings.page && PAGES[settings.page]) { page = { name: settings.page, ...pageBox() }; drawOutline(); }
   syncPages();
+  // bring back last visit's paintings: this page's returns now, the others wait in `saved` for restorePage()
+  store.all().then(rows => {
+    for (const r of rows || []) {
+      if (saved.has(r.name) || gen(r.name)) continue; // already handled this visit
+      if (r.w !== paint.width || r.h !== paint.height) { store.del(r.name); continue; } // the canvas is a different size now
+      saved.set(r.name, { box: r.box, blobs: r.blobs.map(b => Promise.resolve(b)) });
+    }
+    loaded = true; restorePage();
+  }).catch(() => { loaded = true; });
   // The shared grown-up timer eases the sound down at bedtime and stops it at goodnight
   if (window.KidsGrownup) KidsGrownup.register({
     setVolume(v) { vol = v; asleep = false; if (master) master.gain.setTargetAtTime(0.54 * v, actx.currentTime, 0.3); },

@@ -33,11 +33,12 @@
   .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
   .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
   .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .modes button, .toggles button, .done { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; }
+  .modes button, .toggles button, .done, .home { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; }
   .modes button.on { border-color: #38c6f4; background: #e3f7ff; }
   .toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .toggles button.off { opacity: .45; }
   .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
+  .home { display: block; box-sizing: border-box; width: 100%; margin-top: 10px; text-align: center; text-decoration: none; }
 </style>
 <link rel="stylesheet" href="../shared/grownup.css">
 </head>
@@ -81,6 +82,7 @@
       <button id="tFull" style="grid-column: span 2">⛶ Full screen</button>
     </div>
     <div data-kg-panel></div>
+    <a class="home" id="home" href="../">🏠 All games</a>
     <button class="done" id="done">Let's play!</button>
   </div>
 </div>
