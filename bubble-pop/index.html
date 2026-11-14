@@ -39,12 +39,13 @@
   .card p { margin: 0 0 14px; font-size: 13px; opacity: .7; }
   .label { font-weight: 800; font-size: 14px; margin: 12px 0 6px; }
   .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .modes button, .toggles button, .done { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; }
+  .modes button, .toggles button, .done, .home { padding: 12px 8px; border-radius: 14px; border: 3px solid transparent; background: #eef0ff; font-weight: 800; font-size: 15px; color: #2b2d5c; cursor: pointer; }
   .modes button.on { border-color: #38c6f4; background: #e3f7ff; }
   .toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .toggles button.off { opacity: .45; }
   .toggles button.on { border-color: #38c6f4; background: #e3f7ff; }
   .done { width: 100%; margin-top: 16px; background: #ff6fb1; color: #fff; }
+  .home { display: block; box-sizing: border-box; width: 100%; margin-top: 10px; text-align: center; text-decoration: none; }
   /* sticker book: a big button top-left (the top-right corner is the gear and the bedtime ring) and a full-screen album */
   #bookBtn { position: fixed; top: calc(10px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left)); width: 58px; height: 58px; border-radius: 20px; border: 3px solid #fff; background: rgba(255,255,255,.5); font-size: 30px; line-height: 1; padding: 0; z-index: 3; touch-action: manipulation; box-shadow: 0 3px 10px rgba(43,45,92,.2); }
   #bookBtn.bump { animation: bump .55s ease; }
@@ -160,6 +161,7 @@
       <button id="rBook">Reset sticker book</button>
     </div>
     <div data-kg-panel></div>
+    <a class="home" id="home" href="../">🏠 All games</a>
     <button class="done" id="done">Let's play!</button>
   </div>
 </div>
