@@ -2,6 +2,7 @@
 // API: KidsGrownup.register({ setVolume(v), pause() })  - a game calls this once;
 //      KidsGrownup.mountPanel(container)                - renders the "Who's playing?" and "Play time" controls (any [data-kg-panel] is mounted automatically).
 //      KidsGrownup.who() -> 'little' | 'big'            - who's playing, shared by every game; a 'kidswho' event fires on window when it changes.
+//      KidsGrownup.sound() -> true | false              - the one sound switch for every game (off: setVolume(0), and games skip speech).
 (() => {
   if (window.KidsGrownup) return;
 
@@ -58,7 +59,7 @@
   addEventListener('storage', e => { if (e.key === KEY) refresh(); });
 
   // ---------- Game hook ----------
-  let hook = null, sentV = 1;
+  let hook = null, sentV = 1, soundOn = true;
   const call = (fn, ...a) => { try { hook && hook[fn] && hook[fn](...a); } catch (e) {} };
   function register(h) {
     hook = h || null;
@@ -210,10 +211,11 @@
     });
   }
   function tinkle() {
-    if (!wakeAudio() || !ac || ac.state !== 'running') return;
+    if (!soundOn || !wakeAudio() || !ac || ac.state !== 'running') return;
     note(ac.currentTime, [84, 86, 88, 91, 93][(Math.random() * 5) | 0], 1.1, 0.035);
   }
   function lullaby() {
+    if (!soundOn) return;
     // beats at 3/4: [midi, beats]; C pentatonic, gently falling
     const tune = [[64, 1], [67, 1], [69, 1], [67, 2], [64, 1], [62, 1], [64, 1], [67, 1], [60, 3],
       [69, 1], [72, 1], [69, 1], [67, 2], [64, 1], [62, 1], [64, 1], [62, 1], [60, 3.5]];
@@ -236,7 +238,7 @@
     st.state = stateFor();
     const p = windP();
     renderRing(p); renderDim(p);
-    const v = 1 - (1 - VOL_MIN) * p;
+    const v = soundOn ? 1 - (1 - VOL_MIN) * p : 0; // the sound switch is a volume of 0, so games need nothing new
     if (st.state !== 'goodnight' && Math.abs(v - sentV) > 0.004) { sentV = v; call('setVolume', v); }
     const wantNight = st.state === 'goodnight';
     if (wantNight && !nightOn) {
@@ -266,6 +268,8 @@
     box.dataset.kgMounted = '1'; box.classList.add('kg-sec'); panels.add(box);
     box.innerHTML = `<div class="kg-label">Who's playing?</div>
       <div class="kg-chips kg-who"><button type="button" class="kg-btn" data-who="little">🧸 Little (1–2)</button><button type="button" class="kg-btn" data-who="big">🚀 Big kid (3–5)</button></div>
+      <div class="kg-label">Sound in every game</div>
+      <div class="kg-chips kg-sound"><button type="button" class="kg-btn" data-sound="on">🔊 On</button><button type="button" class="kg-btn" data-sound="off">🔇 Off</button></div>
       <div class="kg-label">⏰ Play time</div><div class="kg-left"></div>
       <div class="kg-chips"><button type="button" class="kg-btn" data-lim="0">Off</button>${PRESETS.map(m => `<button type="button" class="kg-btn" data-lim="${m}">${m}</button>`).join('')}</div>
       <div class="kg-step"><button type="button" class="kg-btn" data-step="-1" aria-label="Less time">−</button><span class="kg-len"></span><button type="button" class="kg-btn" data-step="1" aria-label="More time">+</button></div>
@@ -280,6 +284,7 @@
         setLimit(!L ? (up ? 5 : 0) : up ? (L < 5 ? L + 1 : L + 5) : (L <= 5 ? Math.max(1, L - 1) : L - 5));
       }
       else if (b.dataset.who) setWho(b.dataset.who);
+      else if (b.dataset.sound) setSound(b.dataset.sound === 'on');
       else if (b.dataset.show) { st.show = b.dataset.show; update(); save(); }
       else if (b.hasAttribute('data-new')) { newSession(); update(); save(); }
     });
@@ -291,6 +296,7 @@
       box.querySelectorAll('[data-lim]').forEach(b => b.classList.toggle('on', +b.dataset.lim === st.limit));
       box.querySelectorAll('[data-show]').forEach(b => b.classList.toggle('on', b.dataset.show === st.show));
       box.querySelectorAll('[data-who]').forEach(b => b.classList.toggle('on', b.dataset.who === who));
+      box.querySelectorAll('[data-sound]').forEach(b => b.classList.toggle('on', (b.dataset.sound === 'on') === soundOn));
       box.querySelector('.kg-len').textContent = st.limit ? st.limit + ' min' : 'Off';
       box.querySelector('.kg-left').textContent = !st.limit ? 'No limit. Play as long as you like.'
         : st.state === 'goodnight' ? "Time's up." : minutesLeft() + ' min left';
@@ -310,6 +316,19 @@
   }
   addEventListener('storage', e => { if (e.key === WHO_KEY) { const w = readWho(); if (w !== who) { who = w; syncPanels(); dispatchEvent(new CustomEvent('kidswho', { detail: who })); } } });
 
+  // ---------- One sound switch for every game (each game keeps its own toggle too; this one wins when it is off) ----------
+  const SOUND_KEY = 'kidsGames.sound.v1';
+  const readSound = () => { try { const o = JSON.parse(localStorage.getItem(SOUND_KEY)); return !(o && o.on === false); } catch (e) { return true; } };
+  function applySound() { if (!soundOn) { hush(); try { if ('speechSynthesis' in window) speechSynthesis.cancel(); } catch (e) {} } update(); }
+  function setSound(on) {
+    on = !!on;
+    if (on === soundOn) return;
+    soundOn = on;
+    try { localStorage.setItem(SOUND_KEY, JSON.stringify({ on })); } catch (e) {}
+    applySound();
+  }
+  addEventListener('storage', e => { if (e.key === SOUND_KEY) { const on = readSound(); if (on !== soundOn) { soundOn = on; applySound(); } } });
+
   // ---------- Keep the game behind the goodnight scene quiet ----------
   ['pointerdown', 'pointermove', 'click', 'dblclick', 'keydown'].forEach(type => addEventListener(type, e => {
     if (st.state !== 'goodnight') return;
@@ -320,6 +339,7 @@
 
   // ---------- Start ----------
   function init() {
+    soundOn = readSound();
     const o = read();
     if (adopt(o)) { const now = Date.now(); if (st.limit && now - st.lastTick > AWAY) newSession(); st.lastTick = now; }
     st.state = stateFor();
@@ -327,8 +347,8 @@
     document.querySelectorAll('[data-kg-panel]').forEach(mountPanel);
     setInterval(tick, TICK);
   }
-  window.KidsGrownup = { register, mountPanel, who: () => who };
+  window.KidsGrownup = { register, mountPanel, who: () => who, sound: () => soundOn };
   if (DEBUG) window.__grownup = () => ({ limit: st.limit, show: st.show, remainingMs: st.remainingMs, lastTick: st.lastTick, state: st.state,
-    windProgress: windP(), windMs: windMs(), who, volume: sentV, minutesLeft: minutesLeft(), fast: FAST, hook: !!hook, night: nightOn, lullaby: lulling });
+    windProgress: windP(), windMs: windMs(), who, sound: soundOn, volume: sentV, minutesLeft: minutesLeft(), fast: FAST, hook: !!hook, night: nightOn, lullaby: lulling });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

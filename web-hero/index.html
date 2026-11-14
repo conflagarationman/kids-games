@@ -547,9 +547,10 @@
   const endAim = e => {
     if (!aim || e.pointerId !== aim.id) return;
     const a = aim; aim = null;
-    if (e.type === 'pointercancel') return;
     const lx = a.x0 - a.x, ly = a.y0 - a.y;
     if (Math.hypot(lx, ly) >= 12) { const v = launchFrom(lx, ly); fire(v.vx, v.vy); }
+    // the browser took the touch away (a system popup, a palm): a pull that was aimed still fires, but a touch that never moved does nothing
+    else if (e.type === 'pointercancel') return;
     else if (a.x0 > heroX + u * 1.2) {
       const hit = settings.tap === 'yank' && live ? Query.point(dyn, { x: a.x0, y: a.y0 })[0] : null;
       if (hit && yanks.length < 2) yank(hit, a.x0, a.y0);

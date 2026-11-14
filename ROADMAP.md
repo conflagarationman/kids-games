@@ -24,11 +24,8 @@ Roughly in priority order. None are committed to. Check with the owner before st
 2. **Web Hero: rescue mini-levels.** Web a falling kitten or ice cream before it lands, for variety between tower levels.
 3. **Web Hero: choice of hero,** a few original color and suit variants.
 4. **Web Hero: fuller Big levels on portrait iPads.** The narrow screen only fits about 2 vehicles; stack more vertically when tall.
-5. **Shared sound on or off:** the play-time limit is built (see History), but each game still has its own sound toggle. One switch on the home page could set them all.
-6. **Magic Paint: more pictures** (dinosaur, truck, rocket) and a few with more detail for older kids.
-7. **Little Band: keep the last recording** in `localStorage` so it survives a reload.
-8. **Web Hero: a cancelled pull still fires.** When the browser cancels a pull (`pointercancel`, e.g. a system popup), the shot is dropped. Firing what was aimed would fit "a broken drag still does something sensible".
-9. **Where's the Cow?** A listening and vocabulary game for ages 3–4: animals shown, "Can you find the cow?" asked. Partly covered now by Bubble Pop's Find it mode.
+5. **Magic Paint: more pictures** (dinosaur, truck, rocket) and a few with more detail for older kids.
+6. **Where's the Cow?** A listening and vocabulary game for ages 3–4: animals shown, "Can you find the cow?" asked. Partly covered now by Bubble Pop's Find it mode.
 
 ## Research notes (why the games are built the way they are)
 
@@ -66,3 +63,4 @@ Roughly in priority order. None are committed to. Check with the owner before st
 - **Polish and speed pass:** ten recommendations from a review of every game, done by four parallel Sonnet sessions. Bubble Pop draws from cached sprites (game code per frame 3.6ms to 0.3ms) with seamless clouds. Magic Paint got instant fills (425ms to 5ms on a 12.9" iPad), per-page painting memory, a smooth brush plus a crayon option, and idle-frame skipping. Little Band draws its keyboard once and caps voices at 10. Web Hero's vehicles are hand-drawn instead of emoji. Every game got sticker emoji and a sound limiter. A font and a grown-up bedtime timer follow in a second round.
 - **Shared bundle (font and play-time timer):** `shared/KidsRounded.woff2` (Nunito ExtraBold, OFL) gives every big glyph a rounded face on iPads, which don't have Arial Rounded. `shared/grownup.js` and `grownup.css` add the grown-up bedtime timer to the home page and every game: a limit chosen by the grown-up, one clock across games, a small ring then moon, a wind-down, and a goodnight scene with a lullaby. This was the "Shared grown-up settings" backlog item; the sound toggle part was left out.
 - **Finger lock, way home, saved paintings:** Web Hero no longer ignores every other touch while one finger rests on the screen (the newest finger takes over the aim). Every game's grown-up panel has a 🏠 All games button back to the home page. Magic Paint keeps each page's painting in IndexedDB (PNG blobs) across reloads, cleared with Clear. Not yet checked on a real iPad: a page evicted by iOS, and whether a bare `pagehide` finishes encoding.
+- **Three small roadmap items:** one "Sound in every game" switch in the shared grown-up panel (home page and every game). Little Band keeps its last recording across reloads. Web Hero fires a pull the browser cancelled, so a broken drag still does something sensible.

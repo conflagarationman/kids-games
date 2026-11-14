@@ -334,12 +334,28 @@
   // A take is a list of { t, kind: 'key' | 'pad', midi, voice, dur, id } in seconds from the start.
   const MAX_REC = 20, clock = () => performance.now() / 1000;
   let rec = null, take = null, playing = null;
+  // The last take is kept across reloads (progress, in its own key apart from settings). Anything odd in storage is dropped.
+  const TAKE_KEY = 'littleBand.take.v1';
+  const num = (x, a, b) => typeof x === 'number' && isFinite(x) ? Math.max(a, Math.min(b, x)) : null;
+  function cleanTake(list) {
+    if (!Array.isArray(list)) return null;
+    const out = [];
+    for (const e of list.slice(0, 2000)) {
+      const t = e && num(e.t, 0, MAX_REC + 1);
+      if (t == null) continue;
+      if (e.kind === 'pad' && PADS[e.id]) out.push({ t, kind: 'pad', id: e.id });
+      else if (e.kind === 'key' && VOICES[e.voice] && num(e.midi, 21, 108) != null) out.push({ t, kind: 'key', midi: Math.round(e.midi), voice: e.voice, dur: num(e.dur, 0.08, MAX_REC) || 0.4 });
+    }
+    return out.length ? out : null;
+  }
+  try { take = cleanTake(JSON.parse(localStorage.getItem(TAKE_KEY))); } catch (e) {}
+  const saveTake = () => { try { localStorage.setItem(TAKE_KEY, JSON.stringify(take)); } catch (e) {} };
   const ghost = new Map(); // keys lit by playback
   function recEvent(ev) { if (!rec) return null; ev.t = clock() - rec.t0; rec.events.push(ev); return ev; }
   function startRec() { stopPlay(); rec = { t0: clock(), events: [] }; blip('bells', 72, 120); }
   function stopRec() {
     if (!rec) return;
-    if (rec.events.length) take = rec.events;
+    if (rec.events.length) { take = rec.events; saveTake(); }
     rec = null; blip('bells', 67, 120);
   }
   function startPlay() {
